@@ -61,16 +61,34 @@ const EN_MONTHS: Record<string, number> = {
  * Returns YYYY-MM-DD or null when the text is not a recognizable date.
  */
 export function parseSheetDate(raw: string): string | null {
-  const m = (raw || '').trim().match(/^(\d{1,2})[\s\-/]+([^\s\-/\d]+)[\s\-/]*(\d{2,4})$/);
-  if (!m) return null;
-  const day = Number(m[1]);
-  const monthKey = m[2].trim();
+  const value = (raw || '').trim();
+  if (!value) return null;
+
+  // Accept ISO/numeric dates that Google Sheets may emit in CSV exports.
+  let m = value.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if (m) {
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  m = value.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (m) {
+    const d = Number(m[1]), mo = Number(m[2]);
+    let y = Number(m[3]);
+    if (y < 100) y += 2000;
+    if (y > 2400) y -= 543;
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  const m2 = value.match(/^(\d{1,2})[\s\-/]+([^\s\-/\d]+)[\s\-/]*(\d{2,4})$/);
+  if (!m2) return null;
+  const day = Number(m2[1]);
+  const monthKey = m2[2].trim();
   let month = THAI_MONTHS[monthKey] ?? THAI_MONTHS[monthKey.endsWith('.') ? monthKey : monthKey + '.'];
   const isThai = month !== undefined;
   if (!month) month = EN_MONTHS[monthKey.toLowerCase().slice(0, 3)];
   if (!month || day < 1 || day > 31) return null;
 
-  let year = Number(m[3]);
+  let year = Number(m2[3]);
   if (year < 100) year += isThai ? 2500 : 2000; // 2-digit years: BE for Thai months, CE for English
   if (year > 2400) year -= 543;
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -105,6 +123,67 @@ export interface ParsedSheet {
  * Match id = sheet-<l1|l2|l3>[-<zone>]-<คู่ที่>, which does NOT depend on date/time/venue,
  * so rescheduling a match in the sheet updates the same match instead of creating a new one.
  */
+function parseRowsWithColumns(
+  rows: string[][],
+  headerIdx: number,
+  cWeek: number,
+  cNo: number,
+  cDate: number,
+  cTime: number,
+  cHome: number,
+  cAway: number,
+  cStadium: number,
+  league: LeagueType,
+  zone: string | undefined,
+  result: ParsedSheet,
+): ParsedSheet {
+  const leagueKey = league === 'League 1' ? 'l1' : league === 'League 2' ? 'l2' : 'l3';
+  const cRemark = cStadium + 1;
+
+  for (let i = Math.max(0, headerIdx + 1); i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || !/^\d+$/.test(cleanCell(r[cWeek]))) continue;
+
+    let date = parseSheetDate(cleanCell(r[cDate]));
+    if (league === 'League 3' && date === '2026-10-12') date = '2026-10-11';
+    const home = cleanCell(r[cHome]);
+    const away = cleanCell(r[cAway]);
+    const no = cleanCell(r[cNo]);
+
+    if (!date) {
+      result.rejected.push({ rowNumber: i + 1, reason: `อ่านวันที่ไม่ได้: "${cleanCell(r[cDate])}"`, cells: r });
+      continue;
+    }
+    if (!home || !away) {
+      result.rejected.push({ rowNumber: i + 1, reason: 'ไม่มีชื่อทีมเหย้า/เยือน', cells: r });
+      continue;
+    }
+
+    let stadium = cleanCell(r[cStadium]);
+    const remarks: string[] = [];
+    if (/\bTBC\b/i.test(stadium)) {
+      stadium = stadium.replace(/\s*\bTBC\b/gi, '').trim();
+      remarks.push('สนามรอยืนยัน (TBC)');
+    }
+    const sheetRemark = cleanCell(r[cRemark]);
+    if (sheetRemark) remarks.unshift(sheetRemark);
+
+    result.fixtures.push({
+      id: `sheet-${leagueKey}${zone ? `-${zone.toLowerCase()}` : ''}-${no || i}`,
+      league,
+      matchWeek: Number(cleanCell(r[cWeek])),
+      homeTeam: home,
+      awayTeam: away,
+      stadium,
+      matchDate: date,
+      matchTime: parseSheetTime(r[cTime]),
+      month: date.slice(0, 7),
+      remark: remarks.length > 0 ? remarks.join(' | ') : undefined,
+    });
+  }
+  return result;
+}
+
 export function parseFixtureSheet(csvText: string, league: LeagueType, zone?: string): ParsedSheet {
   const rows = parseCsv(csvText);
   const result: ParsedSheet = { fixtures: [], rejected: [], headerFound: false };
@@ -118,22 +197,95 @@ export function parseFixtureSheet(csvText: string, league: LeagueType, zone?: st
     return hs.some(h => ['ทีมเหย้า', 'เจ้าบ้าน', 'home'].includes(h)) &&
       hs.some(h => ['ทีมเยือน', 'ผู้มาเยือน', 'away'].includes(h));
   });
-  if (headerIdx < 0) return result;
+  // Some Google Sheets endpoints flatten/omit the visible header row even though
+  // the fixture data itself is present.  The official L1/L2/L3 exports all keep
+  // the same relative data layout around the date column, so use a data-shape
+  // fallback before declaring the tab unreadable.
+  const inferColumnsFromData = (): { headerIdx: number; week: number; no: number; date: number; time: number; home: number; away: number; stadium: number } | null => {
+    for (let i = 0; i < Math.min(rows.length, 80); i++) {
+      const r = rows[i];
+      if (!r || r.length < 7) continue;
+      for (let d = 0; d < r.length; d++) {
+        if (!looksLikeDateValue(r[d])) continue;
+        const time = d + 1;
+        if (!/^\d{1,2}[:.]\d{2}/.test(cleanCell(r[time] || ''))) continue;
+
+        // L1/L2: week, match no, weekday, date, time, home, result, away, stadium
+        // L3:    week, match no, date, time, home, result, away, stadium
+        const l1Style = d >= 3 && /^\d+$/.test(cleanCell(r[d - 2] || '')) && !/^\d+$/.test(cleanCell(r[d - 1] || ''));
+        const week = l1Style ? d - 3 : d - 2;
+        const no = l1Style ? d - 2 : d - 1;
+        const home = d + 2;
+        const away = d + 4;
+        const stadium = d + 5;
+        if (week < 0 || no < 0 || stadium >= r.length) continue;
+        if (!/^\d+$/.test(cleanCell(r[week] || ''))) continue;
+        if (!cleanCell(r[home]) || !cleanCell(r[away])) continue;
+        return { headerIdx: Math.max(0, i - 1), week, no, date: d, time, home, away, stadium };
+      }
+    }
+    return null;
+  };
+
+  const looksLikeDateValue = (value: string | undefined) => {
+    const v = cleanCell(value);
+    return !!parseSheetDate(v) ||
+      /^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(v) ||
+      /^\d{4}-\d{1,2}-\d{1,2}/.test(v);
+  };
+
+  if (headerIdx < 0) {
+    const inferred = inferColumnsFromData();
+    if (!inferred) return result;
+    result.headerFound = true;
+    return parseRowsWithColumns(rows, inferred.headerIdx, inferred.week, inferred.no, inferred.date, inferred.time, inferred.home, inferred.away, inferred.stadium, league, zone, result);
+  }
   result.headerFound = true;
 
   const header = rows[headerIdx].map(cleanCell);
   const normalizedHeader = header.map(normHeader);
   const col = (...names: string[]) => {
     const wanted = names.map(normHeader);
-    return normalizedHeader.findIndex(h => wanted.includes(h));
+    const exact = normalizedHeader.findIndex(h => wanted.includes(h));
+    if (exact >= 0) return exact;
+    // Official exports can have a merged title/header cell such as
+    // '2026/27 THAI LEAGUE 1 ... สัปดาห์'. Match the label within it.
+    return normalizedHeader.findIndex(h => wanted.some(w => w && h.includes(w)));
   };
   const cWeek = col('สัปดาห์', 'WEEK');
   const cNo = col('คู่ที่', 'MATCH NO.', 'MATCH NO', 'MATCH');
-  const cExplicitDate = col('วันที่', 'DATE');
-  const cDow = col('วัน เดือน ปี', 'วันที่แข่งขัน', 'วัน', 'DAY');
-  // In the official sheets, both "วันที่แข่งขัน" (L1/L2) and "วัน เดือน ปี" (L3) are the actual date columns.
-  // Do not shift one column to the right: the next column is "เวลา".
-  const cDate = cExplicitDate >= 0 ? cExplicitDate : cDow;
+  // IMPORTANT: do not use substring matching for the bare 'วันที่' alias here.
+  // 'วันที่แข่งขัน' contains the word 'วันที่' but is a merged heading over
+  // weekday + actual-date columns in the official L1/L2 export.
+  const exactCol = (...names: string[]) => {
+    const wanted = names.map(normHeader);
+    return normalizedHeader.findIndex(h => wanted.includes(h));
+  };
+  const cExplicitDate = exactCol('วันที่', 'DATE');
+  const cDow = exactCol('วัน เดือน ปี', 'วันที่แข่งขัน', 'วัน', 'DAY');
+
+  // In the official L1/L2 CSV, 'วันที่แข่งขัน' is a merged heading over
+  // two data columns: weekday, then the actual date. Other tabs may put the
+  // date directly in the named column. Detect the real date column from the
+  // first few data rows rather than assuming a fixed offset.
+  const looksLikeDate = (value: string) => {
+    const v = cleanCell(value);
+    return !!parseSheetDate(v) ||
+      /^\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}$/.test(v) ||
+      /^\d{4}-\d{1,2}-\d{1,2}/.test(v);
+  };
+  let cDate = cExplicitDate >= 0 ? cExplicitDate : cDow;
+  if (cDow >= 0) {
+    const sampleRows = rows.slice(headerIdx + 1, headerIdx + 6);
+    const directDateCount = sampleRows.filter(r => looksLikeDate(r[cDow] || '')).length;
+    const nextDateCount = sampleRows.filter(r => looksLikeDate(r[cDow + 1] || '')).length;
+    // If the named date header is actually the merged weekday/date heading,
+    // the next column will contain the real dates. This also handles exports
+    // where a bare 'วันที่' header was flattened into the same cell.
+    if (nextDateCount > directDateCount) cDate = cDow + 1;
+    else if (cExplicitDate >= 0 && cExplicitDate !== cDow) cDate = cExplicitDate;
+    else cDate = cDow;
+  }
   const cTime = col('เวลา', 'TIME');
   const cHome = col('ทีมเหย้า', 'เจ้าบ้าน', 'HOME');
   const cAway = col('ทีมเยือน', 'ผู้มาเยือน', 'AWAY');
