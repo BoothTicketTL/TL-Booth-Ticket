@@ -1,4 +1,4 @@
-import { fetchExport, fetchGviz, getKnownTabs, setJson, setText } from '../_googleSheets';
+import { fetchExport, fetchGviz, getKnownTabs, setJson, setText } from '../_googleSheets.js';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') return setJson(res, 405, { error: 'Method not allowed' });
