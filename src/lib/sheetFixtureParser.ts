@@ -144,8 +144,7 @@ function parseRowsWithColumns(
     const r = rows[i];
     if (!r || !/^\d+$/.test(cleanCell(r[cWeek]))) continue;
 
-    let date = parseSheetDate(cleanCell(r[cDate]));
-    if (league === 'League 3' && date === '2026-10-12') date = '2026-10-11';
+    const date = parseSheetDate(cleanCell(r[cDate]));
     const home = cleanCell(r[cHome]);
     const away = cleanCell(r[cAway]);
     const no = cleanCell(r[cNo]);
@@ -303,11 +302,7 @@ export function parseFixtureSheet(csvText: string, league: LeagueType, zone?: st
     const r = rows[i];
     if (!r || !/^\d+$/.test(cleanCell(r[cWeek]))) continue; // blank / footer rows
 
-    let date = parseSheetDate(cleanCell(r[cDate]));
-    // Align League 3 matches to 9-11 Oct weekend with League 1 & 2
-    if (league === 'League 3' && date === '2026-10-12') {
-      date = '2026-10-11';
-    }
+    const date = parseSheetDate(cleanCell(r[cDate]));
     const home = cleanCell(r[cHome]);
     const away = cleanCell(r[cAway]);
     const no = cleanCell(r[cNo]);
