@@ -1,0 +1,30 @@
+Thai League 2026/27 - Vercel Google Sheets FIX v5
+
+This package is based on the uploaded project and includes fixes for live Google Sheets fixture sync.
+
+Official fixture sources configured:
+1) League 1 + League 2
+   Spreadsheet ID: 1qHdscqV7j2GB8UoF9c59UvV1Tw_eQqBV6nfJMn64Pfw
+   League 1 tab: T1-(THA)
+   League 2 tab: T2-(THA)
+
+2) League 3
+   Spreadsheet ID: 1ixW80nSPE5rZCsdUwZlapeJ4NhOzyS03rj_W1_4vu7c
+   Tabs: NORTH, NORTHEAST, EAST, CENTRAL, WEST, SOUTH
+
+Main fixes:
+- Added Vercel serverless endpoints: api/sheets/fetch-csv.ts and api/sheets/tabs.ts.
+- Exact Google Sheet tab names are fetched directly through Google Visualization instead of relying on brittle Google HTML/GID discovery.
+- Added known mappings for the two official fixture spreadsheets.
+- Updated the default League 3 URL to the current GID supplied by the owner.
+- Made fixture header detection tolerant of merged headers and common Thai/English variants.
+- Added vercel.json for Vite + Vercel deployment.
+
+Deployment safety:
+- Do NOT delete the existing Vercel project.
+- Keep existing Vercel Environment Variables/Firebase settings.
+- Deploy this package as a new deployment/commit first, then test Sync.
+
+Validation:
+- Vercel API TypeScript files passed tsc syntax/type checking in the build workspace.
+- Full npm build was not executed in this workspace because dependency installation was unavailable within the execution window.

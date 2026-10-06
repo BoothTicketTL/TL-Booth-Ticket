@@ -277,9 +277,7 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
     // Align League 3 dates so that matches fall on the exact same weekend as League 1 & 2
     // ("ของลีก 1-2 ขึ้นตารางแข่งวันที่ 9-11 ต.ค.2569 แต่ทำไมลีก 3 เป็นแมตช์วันที่ 10-12 ต.ค.2569 ควรเป็นช่วงวันที่แข่งขันเดียวกัน ปรับหน่อย")
     const alignedMatches = weekMatches.map(f => {
-      if (f.league === 'League 3' && f.matchDate === '2026-10-12') {
-        return { ...f, matchDate: '2026-10-11' };
-      }
+     
       return f;
     });
 

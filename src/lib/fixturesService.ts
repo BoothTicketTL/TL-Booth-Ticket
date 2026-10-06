@@ -1361,10 +1361,7 @@ export function parseFixturesFromMatrix(rows: string[][], defaultLeague: LeagueT
       matchDate = '2026-10-03';
     }
 
-    // Strict check: League 3 matches in October weekend align with League 1 & 2 to 9-11 Oct (normalize 12 Oct to 11 Oct)
-    if (league === 'League 3' && matchDate === '2026-10-12') {
-      matchDate = '2026-10-11';
-    }
+   
 
     const matchKey = `${league}_${homeTeam}_${awayTeam}`;
     if (!fixturesMap.has(matchKey)) {
@@ -1437,74 +1434,61 @@ export async function fetchSingleSheetText(
   sheetId: string,
   target?: { gid?: string | null; sheetName?: string; tabIndex?: number }
 ): Promise<string | null> {
-  const isInvalidCsv = (txt: string) => {
-    return (
-      !txt ||
-      txt.length < 15 ||
-      txt.includes('<!DOCTYPE html>') ||
-      txt.includes('<html') ||
-      txt.includes('accounts.google.com') ||
-      (txt.includes('google.visualization.Query.setResponse') && txt.includes('"status":"error"'))
-    );
+  const isInvalidCsv = (txt: string) => (
+    !txt || txt.length < 15 || /<!DOCTYPE html>|<html|accounts\.google\.com/i.test(txt) ||
+    (txt.includes('google.visualization.Query.setResponse') && /"status"\s*:\s*"error"/i.test(txt))
+  );
+
+  // A Google endpoint may return a valid CSV for the wrong/default tab when the
+  // sheet selector is ignored. Accept only a CSV that actually looks like a
+  // fixture table; otherwise continue through the fallback chain.
+  const isFixtureCsv = (txt: string) => {
+    if (isInvalidCsv(txt)) return false;
+    const s = txt.toLowerCase();
+    return /ทีมเหย้า|home/i.test(s) &&
+      /ทีมเยือน|away/i.test(s) &&
+      /เวลา|time/i.test(s) &&
+      /สนามแข่งขัน|stadium/i.test(s) &&
+      /วันที่แข่งขัน|วัน เดือน ปี|วันที่|date/i.test(s);
   };
 
-  // Strategy 1: Server proxy route /api/sheets/fetch-csv (bypasses browser CORS & auth redirects)
+  const read = async (url: string): Promise<string | null> => {
+    try {
+      const res = await fetch(url, { headers: { Accept: 'text/plain,text/csv,*/*;q=0.8' }, cache: 'no-store' });
+      if (!res.ok) return null;
+      const text = await res.text();
+      return isFixtureCsv(text) ? text : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // 1) Server proxy: this is the preferred path because it avoids browser CORS.
   try {
     const qParams = [`sheetId=${encodeURIComponent(sheetId)}`];
-    if (target?.gid !== undefined && target?.gid !== null && target?.gid !== '') {
-      qParams.push(`gid=${encodeURIComponent(target.gid)}`);
-    }
-    if (target?.sheetName) {
-      qParams.push(`sheetName=${encodeURIComponent(target.sheetName.trim())}`);
-    }
-    if (target?.tabIndex !== undefined && target?.tabIndex !== null) {
-      qParams.push(`tabIndex=${encodeURIComponent(target.tabIndex.toString())}`);
-    }
-    const res = await fetch(`/api/sheets/fetch-csv?${qParams.join('&')}`);
+    if (target?.gid) qParams.push(`gid=${encodeURIComponent(target.gid)}`);
+    if (target?.sheetName) qParams.push(`sheetName=${encodeURIComponent(target.sheetName.trim())}`);
+    if (target?.tabIndex !== undefined && target?.tabIndex !== null) qParams.push(`tabIndex=${encodeURIComponent(String(target.tabIndex))}`);
+    const res = await fetch(`/api/sheets/fetch-csv?${qParams.join('&')}`, { cache: 'no-store' });
     if (res.ok) {
       const text = await res.text();
-      if (!isInvalidCsv(text)) {
-        return text;
-      }
+      if (isFixtureCsv(text)) return text;
     }
-  } catch {
-    // try direct gviz strategy
-  }
+  } catch {}
 
+  // 2) Direct GViz fallback.
   const params = ['tqx=out:csv'];
+  if (target?.gid) params.push(`gid=${encodeURIComponent(target.gid)}`);
+  else if (target?.sheetName) params.push(`sheet=${encodeURIComponent(target.sheetName.trim())}`);
+  const gvizUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/gviz/tq?${params.join('&')}`;
+  const gvizText = await read(gvizUrl);
+  if (gvizText) return gvizText;
+
+  // 3) Direct CSV export fallback when a real GID is known.
   if (target?.gid) {
-    params.push(`gid=${target.gid}`);
-  } else if (target?.sheetName) {
-    params.push(`sheet=${encodeURIComponent(target.sheetName.trim())}`);
-  }
-  const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?${params.join('&')}`;
-
-  try {
-    const res = await fetch(gvizUrl);
-    if (res.ok) {
-      const text = await res.text();
-      if (!isInvalidCsv(text)) {
-        return text;
-      }
-    }
-  } catch (err) {
-    // try next strategy
-  }
-
-  // Fallback using direct export endpoint
-  try {
-    const exportUrl = target?.gid 
-      ? `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${target.gid}`
-      : `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
-    const res2 = await fetch(exportUrl);
-    if (res2.ok) {
-      const text2 = await res2.text();
-      if (!isInvalidCsv(text2)) {
-        return text2;
-      }
-    }
-  } catch (err2) {
-    // ignore
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/export?format=csv&gid=${encodeURIComponent(target.gid)}`;
+    const exported = await read(exportUrl);
+    if (exported) return exported;
   }
 
   return null;
@@ -1944,7 +1928,7 @@ export async function syncAllLeaguesFromGoogleSheet(masterUrlInput?: string): Pr
 export const DEFAULT_T1T2_SHEET_URL =
   'https://docs.google.com/spreadsheets/d/1qHdscqV7j2GB8UoF9c59UvV1Tw_eQqBV6nfJMn64Pfw/edit?gid=1540565395#gid=1540565395';
 export const DEFAULT_T3_SHEET_URL =
-  'https://docs.google.com/spreadsheets/d/1ixW80nSPE5rZCsdUwZlapeJ4NhOzyS03rj_W1_4vu7c/edit?gid=673770478#gid=673770478';
+  'https://docs.google.com/spreadsheets/d/1ixW80nSPE5rZCsdUwZlapeJ4NhOzyS03rj_W1_4vu7c/edit?gid=1149972876#gid=1149972876';
 const L1_TAB_NAME = 'T1-(THA)';
 const L2_TAB_NAME = 'T2-(THA)';
 const L3_ZONE_TABS = ['NORTH', 'NORTHEAST', 'EAST', 'CENTRAL', 'WEST', 'SOUTH'];

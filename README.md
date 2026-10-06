@@ -1,20 +1,26 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Thai League 2026/27 Booth & Ticket Registration — Vercel Google Sheets Fix
 
-# Run and deploy your AI Studio app
+This version keeps the existing app and fixes the live Google Sheets fixture sync.
 
-This contains everything you need to run your app locally.
+## Official fixture sources
+- League 1 + League 2: spreadsheet `1qHdscqV7j2GB8UoF9c59UvV1Tw_eQqBV6nfJMn64Pfw`
+  - League 1: `T1-(THA)`
+  - League 2: `T2-(THA)`
+- League 3: spreadsheet `1ixW80nSPE5rZCsdUwZlapeJ4NhOzyS03rj_W1_4vu7c`
+  - `NORTH`, `NORTHEAST`, `EAST`, `CENTRAL`, `WEST`, `SOUTH`
 
-View your app in AI Studio: https://ai.studio/apps/43bc6243-b504-486a-a4d8-af15e2edd949
+## What was fixed
+- Added real Vercel serverless endpoints under `api/sheets/`.
+- Exact tab-name fetching now uses Google Visualization directly; it no longer depends on brittle Google HTML/GID scraping.
+- Added known official tab mappings for the two fixture spreadsheets.
+- Kept CSV/GID fallbacks for compatibility.
+- Made fixture header detection more tolerant of merged Google Sheets headers.
+- Updated the default League 3 URL to the current link supplied by the owner.
 
-## Run Locally
+## Deploy
+1. Replace the existing Vercel project source with this package (preferably via the same GitHub repository).
+2. Keep the existing Vercel Environment Variables and Firebase settings unchanged.
+3. Deploy.
+4. Open the site and use Google Sheets > Sync fixtures.
 
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Do not delete the existing Vercel project before the new deployment is verified.
