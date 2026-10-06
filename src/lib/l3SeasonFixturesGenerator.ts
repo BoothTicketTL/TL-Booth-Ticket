@@ -222,10 +222,7 @@ export function generateCompleteL3ZoneFixtures(allowedZoneIds?: Set<string>): Fi
         const mm = String(matchDateObj.getMonth() + 1).padStart(2, '0');
         const dd = String(matchDateObj.getDate()).padStart(2, '0');
         let matchDate = `${y}-${mm}-${dd}`;
-        // Ensure League 3 matches strictly fall on the 9-11 Oct weekend, aligning with League 1 & 2
-        if (matchDate === '2026-10-12') {
-          matchDate = '2026-10-11';
-        }
+       
         const matchTime = kickTimes[(mIdxInRound + zIdx) % kickTimes.length];
 
         fixtures.push({
