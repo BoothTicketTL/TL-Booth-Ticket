@@ -1,0 +1,6 @@
+{
+  "name": "Thai League 2026-27 Booth & Ticket Registration",
+  "description": "ระบบลงทะเบียนออกบูธและรับบัตรเข้าชมฟุตบอลไทยลีก 2026-27 พร้อมแดชบอร์ดสรุปยอดรายเดือนแบบ Real Time และเชื่อมต่อ Google Sheets",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
