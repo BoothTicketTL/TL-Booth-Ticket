@@ -1361,10 +1361,7 @@ export function parseFixturesFromMatrix(rows: string[][], defaultLeague: LeagueT
       matchDate = '2026-10-03';
     }
 
-    // Strict check: League 3 matches in October weekend align with League 1 & 2 to 9-11 Oct (normalize 12 Oct to 11 Oct)
-    if (league === 'League 3' && matchDate === '2026-10-12') {
-      matchDate = '2026-10-11';
-    }
+   
 
     const matchKey = `${league}_${homeTeam}_${awayTeam}`;
     if (!fixturesMap.has(matchKey)) {
