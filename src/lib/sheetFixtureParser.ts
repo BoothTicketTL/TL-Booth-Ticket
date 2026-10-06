@@ -133,7 +133,7 @@ export function parseFixtureSheet(csvText: string, league: LeagueType, zone?: st
   const cNo = col('คู่ที่', 'MATCH NO.', 'MATCH NO', 'MATCH');
   const cExplicitDate = -1;
   const cDow = col('วัน เดือน ปี', 'วันที่แข่งขัน', 'วัน', 'DAY');
-  const cDate = cExplicitDate >= 0 ? cExplicitDate : (cDow >= 0 ? cDow + 1 : -1);
+  const cDate = cExplicitDate >= 0 ? cExplicitDate : cDow;
   const cTime = col('เวลา', 'TIME');
   const cHome = col('ทีมเหย้า', 'เจ้าบ้าน', 'HOME');
   const cAway = col('ทีมเยือน', 'ผู้มาเยือน', 'AWAY');
