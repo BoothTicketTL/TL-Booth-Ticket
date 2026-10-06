@@ -16,6 +16,8 @@ const KNOWN_TABS: Record<string, Array<{ name: string; gid: string }>> = {
   ],
 };
 
+const FETCH_TIMEOUT_MS = 12000;
+
 const FETCH_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/154.0 Safari/537.36',
   Accept: 'text/html,text/plain,text/csv,*/*;q=0.8',
@@ -131,25 +133,39 @@ export async function discoverTabs(sheetId: string): Promise<Array<{ name: strin
   return dedupeTabs([...known, ...discovered]);
 }
 
+async function fetchText(url: string): Promise<{ ok: boolean; text: string; status: number }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      headers: { ...FETCH_HEADERS, 'Cache-Control': 'no-cache' },
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    return { ok: response.ok, text, status: response.status };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function fetchGviz(sheetId: string, sheetName?: string, gid?: string) {
   const params = new URLSearchParams({ tqx: 'out:csv' });
   if (gid) params.set('gid', gid);
   else if (sheetName) params.set('sheet', cleanSheetName(sheetName));
   const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/gviz/tq?${params.toString()}`;
-  const response = await fetch(url, { headers: FETCH_HEADERS, redirect: 'follow' });
-  const text = await response.text();
-  if (!response.ok || isBadResponse(text)) return null;
-  return text;
+  const result = await fetchText(url);
+  if (!result.ok || isBadResponse(result.text)) return null;
+  return result.text;
 }
 
 export async function fetchExport(sheetId: string, gid?: string) {
   const params = new URLSearchParams({ format: 'csv' });
   if (gid) params.set('gid', gid);
   const url = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/export?${params.toString()}`;
-  const response = await fetch(url, { headers: FETCH_HEADERS, redirect: 'follow' });
-  const text = await response.text();
-  if (!response.ok || isBadResponse(text)) return null;
-  return text;
+  const result = await fetchText(url);
+  if (!result.ok || isBadResponse(result.text)) return null;
+  return result.text;
 }
 
 /** Find a known/discovered GID for a tab name. */
