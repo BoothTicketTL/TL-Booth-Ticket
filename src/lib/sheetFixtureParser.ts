@@ -112,20 +112,30 @@ export function parseFixtureSheet(csvText: string, league: LeagueType, zone?: st
   const updated = rows.slice(0, 6).find(r => /^\s*UPDATED/i.test(r[0] || ''));
   if (updated) result.updatedLabel = cleanCell(updated[0]);
 
-  const headerIdx = rows.findIndex(r => r.some(c => cleanCell(c) === 'ทีมเหย้า') && r.some(c => cleanCell(c) === 'ทีมเยือน'));
+  const normHeader = (s: string) => cleanCell(s).replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const headerIdx = rows.findIndex(r => {
+    const hs = r.map(normHeader);
+    return hs.some(h => ['ทีมเหย้า', 'เจ้าบ้าน', 'home'].includes(h)) &&
+      hs.some(h => ['ทีมเยือน', 'ผู้มาเยือน', 'away'].includes(h));
+  });
   if (headerIdx < 0) return result;
   result.headerFound = true;
 
   const header = rows[headerIdx].map(cleanCell);
-  const col = (...names: string[]) => header.findIndex(h => names.includes(h));
-  const cWeek = col('สัปดาห์');
-  const cNo = col('คู่ที่');
-  const cDow = col('วัน เดือน ปี', 'วันที่แข่งขัน', 'วัน');
-  const cDate = cDow >= 0 ? cDow + 1 : -1; // header text sits over the weekday column; date is the next column
-  const cTime = col('เวลา');
-  const cHome = col('ทีมเหย้า');
-  const cAway = col('ทีมเยือน');
-  const cStadium = col('สนามแข่งขัน', 'สนาม');
+  const normalizedHeader = header.map(normHeader);
+  const col = (...names: string[]) => {
+    const wanted = names.map(normHeader);
+    return normalizedHeader.findIndex(h => wanted.includes(h));
+  };
+  const cWeek = col('สัปดาห์', 'WEEK');
+  const cNo = col('คู่ที่', 'MATCH NO.', 'MATCH NO', 'MATCH');
+  const cExplicitDate = col('วันที่', 'DATE');
+  const cDow = col('วัน เดือน ปี', 'วันที่แข่งขัน', 'วัน', 'DAY');
+  const cDate = cExplicitDate >= 0 ? cExplicitDate : (cDow >= 0 ? cDow + 1 : -1);
+  const cTime = col('เวลา', 'TIME');
+  const cHome = col('ทีมเหย้า', 'เจ้าบ้าน', 'HOME');
+  const cAway = col('ทีมเยือน', 'ผู้มาเยือน', 'AWAY');
+  const cStadium = col('สนามแข่งขัน', 'สนาม', 'STADIUM');
   const cRemark = cStadium >= 0 ? cStadium + 1 : -1;
 
   if ([cWeek, cNo, cDate, cTime, cHome, cAway, cStadium].some(i => i < 0)) {

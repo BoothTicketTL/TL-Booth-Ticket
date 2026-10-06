@@ -1944,7 +1944,7 @@ export async function syncAllLeaguesFromGoogleSheet(masterUrlInput?: string): Pr
 export const DEFAULT_T1T2_SHEET_URL =
   'https://docs.google.com/spreadsheets/d/1qHdscqV7j2GB8UoF9c59UvV1Tw_eQqBV6nfJMn64Pfw/edit?gid=1540565395#gid=1540565395';
 export const DEFAULT_T3_SHEET_URL =
-  'https://docs.google.com/spreadsheets/d/1ixW80nSPE5rZCsdUwZlapeJ4NhOzyS03rj_W1_4vu7c/edit?gid=673770478#gid=673770478';
+  'https://docs.google.com/spreadsheets/d/1ixW80nSPE5rZCsdUwZlapeJ4NhOzyS03rj_W1_4vu7c/edit?gid=1149972876#gid=1149972876';
 const L1_TAB_NAME = 'T1-(THA)';
 const L2_TAB_NAME = 'T2-(THA)';
 const L3_ZONE_TABS = ['NORTH', 'NORTHEAST', 'EAST', 'CENTRAL', 'WEST', 'SOUTH'];
