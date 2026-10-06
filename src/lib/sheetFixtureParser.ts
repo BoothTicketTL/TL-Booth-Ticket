@@ -125,7 +125,9 @@ export function parseFixtureSheet(csvText: string, league: LeagueType, zone?: st
   const normalizedHeader = header.map(normHeader);
   const col = (...names: string[]) => {
     const wanted = names.map(normHeader);
-    return normalizedHeader.findIndex(h => wanted.includes(h));
+    return normalizedHeader.findIndex(h =>
+  wanted.some(w => h === w || h.includes(w))
+);
   };
   const cWeek = col('สัปดาห์', 'WEEK');
   const cNo = col('คู่ที่', 'MATCH NO.', 'MATCH NO', 'MATCH');
