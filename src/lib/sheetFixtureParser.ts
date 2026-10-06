@@ -125,14 +125,14 @@ export function parseFixtureSheet(csvText: string, league: LeagueType, zone?: st
   const normalizedHeader = header.map(normHeader);
   const col = (...names: string[]) => {
     const wanted = names.map(normHeader);
-    return normalizedHeader.findIndex(h =>
-  wanted.some(w => h === w || h.includes(w))
-);
+    return normalizedHeader.findIndex(h => wanted.includes(h));
   };
   const cWeek = col('สัปดาห์', 'WEEK');
   const cNo = col('คู่ที่', 'MATCH NO.', 'MATCH NO', 'MATCH');
-  const cExplicitDate = -1;
+  const cExplicitDate = col('วันที่', 'DATE');
   const cDow = col('วัน เดือน ปี', 'วันที่แข่งขัน', 'วัน', 'DAY');
+  // In the official sheets, both "วันที่แข่งขัน" (L1/L2) and "วัน เดือน ปี" (L3) are the actual date columns.
+  // Do not shift one column to the right: the next column is "เวลา".
   const cDate = cExplicitDate >= 0 ? cExplicitDate : cDow;
   const cTime = col('เวลา', 'TIME');
   const cHome = col('ทีมเหย้า', 'เจ้าบ้าน', 'HOME');
