@@ -1,5 +1,19 @@
 import { fetchExport, fetchGviz, getKnownTabs, looksLikeFixtureCsv, resolveTab, setJson, setText } from '../_googleSheets';
 
+function isUsableFixtureCsv(text: string | null): boolean {
+  if (!text || text.length < 50) return false;
+  return looksLikeFixtureCsv(text) &&
+    /ทีมเหย้า|home/i.test(text) &&
+    /ทีมเยือน|away/i.test(text) &&
+    /สนามแข่งขัน|stadium/i.test(text) &&
+    /เวลา|time/i.test(text);
+}
+
+function preview(text: string | null): string {
+  if (!text) return '';
+  return text.replace(/\s+/g, ' ').slice(0, 240);
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET') return setJson(res, 405, { error: 'Method not allowed' });
   const sheetId = String(req.query?.sheetId || '').trim();
@@ -9,35 +23,39 @@ export default async function handler(req: any, res: any) {
   if (!sheetId) return setJson(res, 400, { error: 'Missing sheetId' });
 
   const attempts: string[] = [];
+  const tryText = (label: string, text: string | null): string | null => {
+    if (isUsableFixtureCsv(text)) return text;
+    if (text) attempts.push(`${label}:wrong-content:${preview(text)}`);
+    return null;
+  };
+
   try {
-    // 1) Explicit GID is the most reliable path when supplied.
     if (gid) {
       attempts.push(`gviz:gid:${gid}`);
-      const byGid = await fetchGviz(sheetId, undefined, gid);
+      const byGid = tryText(`gviz:gid:${gid}`, await fetchGviz(sheetId, undefined, gid));
       if (byGid) return setText(res, 200, byGid);
       attempts.push(`export:gid:${gid}`);
-      const exported = await fetchExport(sheetId, gid);
+      const exported = tryText(`export:gid:${gid}`, await fetchExport(sheetId, gid));
       if (exported) return setText(res, 200, exported);
     }
 
-    // 2) Exact tab name through GViz.
     if (sheetName) {
       attempts.push(`gviz:sheet:${sheetName}`);
-      const text = await fetchGviz(sheetId, sheetName);
-      if (text) return setText(res, 200, text);
+      const byName = tryText(`gviz:sheet:${sheetName}`, await fetchGviz(sheetId, sheetName));
+      if (byName) return setText(res, 200, byName);
 
-      // 3) Resolve the tab to its actual GID and use both endpoints.
       const resolved = await resolveTab(sheetId, sheetName);
       if (resolved?.gid) {
         attempts.push(`gviz:resolved-gid:${resolved.gid}`);
-        const byGid = await fetchGviz(sheetId, undefined, resolved.gid);
-        if (byGid) return setText(res, 200, byGid);
+        const resolvedGviz = tryText(`gviz:resolved-gid:${resolved.gid}`, await fetchGviz(sheetId, undefined, resolved.gid));
+        if (resolvedGviz) return setText(res, 200, resolvedGviz);
         attempts.push(`export:resolved-gid:${resolved.gid}`);
-        const exported = await fetchExport(sheetId, resolved.gid);
-        if (exported) return setText(res, 200, exported);
+        const resolvedExport = tryText(`export:resolved-gid:${resolved.gid}`, await fetchExport(sheetId, resolved.gid));
+        if (resolvedExport) return setText(res, 200, resolvedExport);
       }
+
       return setJson(res, 404, {
-        error: `Google Sheet tab not readable: ${sheetName}`,
+        error: `Google Sheet tab did not return a fixture table: ${sheetName}`,
         sheetId,
         sheetName,
         attempts,
@@ -45,31 +63,33 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // 4) Tab index fallback (useful for generic callers).
     if (Number.isInteger(tabIndex) && tabIndex >= 0) {
       const tab = getKnownTabs(sheetId)[tabIndex];
       if (tab?.gid) {
-        const byGid = await fetchGviz(sheetId, undefined, tab.gid);
+        attempts.push(`gviz:index:${tabIndex}:gid:${tab.gid}`);
+        const byGid = tryText(`gviz:index:${tabIndex}:gid:${tab.gid}`, await fetchGviz(sheetId, undefined, tab.gid));
         if (byGid) return setText(res, 200, byGid);
-        const exported = await fetchExport(sheetId, tab.gid);
+        attempts.push(`export:index:${tabIndex}:gid:${tab.gid}`);
+        const exported = tryText(`export:index:${tabIndex}:gid:${tab.gid}`, await fetchExport(sheetId, tab.gid));
         if (exported) return setText(res, 200, exported);
       }
     }
 
-    // 5) Default first-sheet fallback.
-    const text = await fetchGviz(sheetId);
+    attempts.push('gviz:default');
+    const text = tryText('gviz:default', await fetchGviz(sheetId));
     if (text) return setText(res, 200, text);
-    const exported = await fetchExport(sheetId);
+    attempts.push('export:default');
+    const exported = tryText('export:default', await fetchExport(sheetId));
     if (exported) return setText(res, 200, exported);
 
-    return setJson(res, 404, { error: 'Unable to read Google Sheet', sheetId, attempts });
+    return setJson(res, 404, { error: 'Unable to read a fixture table from Google Sheet', sheetId, attempts, knownTabs: getKnownTabs(sheetId) });
   } catch (err: any) {
     return setJson(res, 502, {
       error: err?.message || 'Google Sheets fetch failed',
       sheetId,
       sheetName: sheetName || undefined,
       attempts,
-      hint: 'Google must allow the deployment to read the spreadsheet. If the sheet is restricted to signed-in users, a public CSV export or authorized API is required.',
+      hint: 'The endpoint must return a CSV containing fixture headers. If Google requires sign-in, the deployment cannot read a private sheet without an authorized API or public export.',
     });
   }
 }
