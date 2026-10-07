@@ -679,15 +679,7 @@ let currentUserProfile: UserProfile | null = (() => {
   } catch (e) {
     console.error(e);
   }
-  // Default demo user: Plan B Media manager (siriprapa.po@planbmedia.co.th)
-  return {
-    uid: 'user-planb-001',
-    displayName: 'siriprapa.po (Plan B Admin)',
-    email: 'siriprapa.po@planbmedia.co.th',
-    photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-    role: 'admin',
-    organization: 'Plan B Media Co., Ltd.',
-  };
+ return null;
 })();
 
 const authListeners: Set<(user: UserProfile | null) => void> = new Set();
