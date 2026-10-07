@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "RegistrationRecord": {
+      "title": "RegistrationRecord",
+      "description": "Thai League booth and ticket registration request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "league": { "type": "string", "enum": ["League 1", "League 2", "League 3"] },
+        "brand": { "type": "string" },
+        "fixtureId": { "type": "string" },
+        "matchTitle": { "type": "string" },
+        "stadium": { "type": "string" },
+        "matchDate": { "type": "string" },
+        "month": { "type": "string" },
+        "applicantName": { "type": "string" },
+        "applicantEmail": { "type": "string" },
+        "applicantPhone": { "type": "string" },
+        "organization": { "type": "string" },
+        "boothRequired": { "type": "boolean" },
+        "dealerName": { "type": "string" },
+        "dealerPhone": { "type": "string" },
+        "boothQuantity": { "type": "number" },
+        "ticketRequired": { "type": "boolean" },
+        "ticketQuantity": { "type": "number" },
+        "ticketRequesterName": { "type": "string" },
+        "ticketRequesterPhone": { "type": "string" },
+        "remark": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "season": { "type": "string" }
+      },
+      "required": ["league", "brand", "fixtureId", "matchTitle", "applicantEmail", "status", "timestamp"]
+    },
+    "MatchStadiumContact": {
+      "title": "MatchStadiumContact",
+      "description": "Stadium contact details and ticket pickup locations per match",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "matchId": { "type": "string" },
+        "league": { "type": "string" },
+        "matchTitle": { "type": "string" },
+        "matchDate": { "type": "string" },
+        "stadium": { "type": "string" },
+        "boothCoordinatorName": { "type": "string" },
+        "boothCoordinatorPhone": { "type": "string" },
+        "ticketStaffName": { "type": "string" },
+        "ticketStaffPhone": { "type": "string" },
+        "ticketPickupLocation": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["matchId", "league", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/thaileague_registrations/{registrationId}": {
+      "schema": "RegistrationRecord",
+      "description": "Collection of booth and ticket registrations by sponsor brands"
+    },
+    "/thaileague_match_contacts/{contactId}": {
+      "schema": "MatchStadiumContact",
+      "description": "Collection of official match stadium contacts"
+    }
+  }
+}

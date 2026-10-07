@@ -38,6 +38,8 @@ const BACKEND_SHEETS_URL_KEY = 'thaileague_2026_27_backend_sheets_url';
 
 export const DEFAULT_FIREBASE_PROJECT_ID = 'thaileague-2026-27';
 
+import firebaseAppletConfig from '../../firebase-applet-config.json';
+
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
@@ -49,6 +51,7 @@ export interface FirebaseConfigType {
   storageBucket?: string;
   messagingSenderId?: string;
   appId?: string;
+  firestoreDatabaseId?: string;
 }
 
 export function getSavedFirebaseConfig(): FirebaseConfigType | null {
@@ -72,22 +75,23 @@ export function saveFirebaseConfig(config: FirebaseConfigType) {
 
 // Check if Firebase is configured
 export function initFirebaseService() {
-  if (app) return { app, db, auth };
+  if (app && db) return { app, db, auth };
 
   const savedConfig = getSavedFirebaseConfig();
-  const configToUse = savedConfig?.apiKey ? savedConfig : {
-    projectId: DEFAULT_FIREBASE_PROJECT_ID,
-    authDomain: `${DEFAULT_FIREBASE_PROJECT_ID}.firebaseapp.com`,
-  };
+  const configToUse: any = savedConfig?.apiKey ? savedConfig : firebaseAppletConfig;
 
   try {
-    if (!getApps().length && configToUse.apiKey) {
+    if (!getApps().length && configToUse?.apiKey) {
       app = initializeApp(configToUse);
-      db = getFirestore(app);
+      db = configToUse.firestoreDatabaseId 
+        ? getFirestore(app, configToUse.firestoreDatabaseId)
+        : getFirestore(app);
       auth = getAuth(app);
     } else if (getApps().length) {
       app = getApps()[0];
-      db = getFirestore(app);
+      db = configToUse?.firestoreDatabaseId 
+        ? getFirestore(app, configToUse.firestoreDatabaseId)
+        : getFirestore(app);
       auth = getAuth(app);
     }
   } catch (err) {

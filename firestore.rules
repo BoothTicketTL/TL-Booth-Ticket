@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read/write for registrations collection (real-time sync across devices)
+    match /thaileague_registrations/{registrationId} {
+      allow read, write: if true;
+    }
+    
+    // Allow read/write for match contacts
+    match /thaileague_match_contacts/{contactId} {
+      allow read, write: if true;
+    }
+
+    // Default catch-all for any app documents
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
