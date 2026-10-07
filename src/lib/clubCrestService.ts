@@ -135,6 +135,26 @@ function getLeagueFolderName(league?: LeagueType): string {
 }
 
 /**
+ * Maps official club names to exact file names uploaded by user
+ */
+function getKnownCrestFileName(name: string): string {
+  // L1: Lamphun Warriors spelling (วอร์ริเออร์ -> วอริเออร์)
+  if (name === 'ลำพูน วอร์ริเออร์' || name === 'ลำพูน วอริเออร์') return 'ลำพูน วอริเออร์';
+  // L2: Chainat Hornbill (ชัยนาท ฮอร์นบิล เอฟซี -> ชัยนาท ฮอร์นบิล)
+  if (name === 'ชัยนาท ฮอร์นบิล เอฟซี' || name === 'ชัยนาท ฮอร์นบิล') return 'ชัยนาท ฮอร์นบิล';
+  // L3: University & club aliases
+  if (name === 'ม. การกีฬาแห่งชาติวิทยาเขตลำปาง' || name === 'มหาวิทยาลัยการกีฬาแห่งชาติ วิทยาเขตลำปาง') return 'มหาวิทยาลัยการกีฬาแห่งชาติ วิทยาเขตลำปาง';
+  if (name === 'ม. การจัดการและเทคโนโลยีอีสเทิร์น' || name === 'มหาวิทยาลัยการจัดการและเทคโนโลยีอีสเทิร์น') return 'มหาวิทยาลัยการจัดการและเทคโนโลยีอีสเทิร์น';
+  if (name === 'อุดร-บ้านจั่น ยูไนเต็ด' || name === 'อุดร บ้านจั่น ยูไนเต็ด') return 'อุดร บ้านจั่น ยูไนเต็ด';
+  if (name === 'กองเรือรบ' || name === 'สโมสรฟุตบอลกองเรือรบ') return 'สโมสรฟุตบอลกองเรือรบ';
+  if (name === 'ม. นอร์ทกรุงเทพ' || name === 'มหาวิทยาลัยนอร์ทกรุงเทพ') return 'มหาวิทยาลัยนอร์ทกรุงเทพ';
+  if (name === 'ม. ปทุมธานี' || name === 'มหาวิทยาลัยปทุมธานี') return 'มหาวิทยาลัยปทุมธานี';
+  if (name === 'ม. เกษมบัณฑิต เอฟซี' || name === 'มหาวิทยาลัยเกษมบัณฑิต เอฟซี') return 'มหาวิทยาลัยเกษมบัณฑิต เอฟซี';
+  if (name === 'ราชประชา' || name === 'สโมสรฟุตบอลราชประชา') return 'สโมสรฟุตบอลราชประชา';
+  return name;
+}
+
+/**
  * Synchronous crest getter (instant UI rendering from memory cache)
  */
 export function getClubCrest(clubName?: string, leagueHint?: LeagueType): string | null {
@@ -167,14 +187,17 @@ export function getClubCrest(clubName?: string, leagueHint?: LeagueType): string
   }
 
   // 4. Match with the user's uploaded structure in public/crests/:
-  // Priority A: /crests/สโมสรไทยลีก {1|2|3}/{clubName}.jpg
+  // Resolve known filename variation (e.g. ลำพูน วอร์ริเออร์ -> ลำพูน วอริเออร์)
+  const fileBaseName = getKnownCrestFileName(resolvedName);
   const folder = getLeagueFolderName(resolvedLeague);
+
+  // Priority A: /crests/สโมสรไทยลีก {1|2|3}/{fileBaseName}.jpg
   if (folder) {
-    return `/crests/${encodeURIComponent(folder)}/${encodeURIComponent(resolvedName)}.jpg`;
+    return `/crests/${encodeURIComponent(folder)}/${encodeURIComponent(fileBaseName)}.jpg`;
   }
 
-  // Priority B: /crests/{clubName}.jpg
-  return `/crests/${encodeURIComponent(resolvedName)}.jpg`;
+  // Priority B: /crests/{fileBaseName}.jpg
+  return `/crests/${encodeURIComponent(fileBaseName)}.jpg`;
 }
 
 /**
