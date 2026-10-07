@@ -197,9 +197,11 @@ export const MainHubView: React.FC<MainHubViewProps> = ({
                     className="w-full p-3 rounded-2xl bg-white hover:bg-rose-500 hover:text-white text-slate-800 font-bold text-left flex items-center justify-between shadow-2xs border border-rose-200/80 transition-all cursor-pointer group"
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="w-7 h-7 rounded-lg bg-rose-100 group-hover:bg-white group-hover:text-rose-600 text-rose-700 flex items-center justify-center font-extrabold text-xs">
-                        {lg.badgeText}
-                      </span>
+                      <img 
+                        src={`/crests/Logo%20League%20${lg.id === 'League 1' ? '1' : lg.id === 'League 2' ? '2' : '3'}.png`} 
+                        alt={lg.name}
+                        className="w-7 h-9 object-contain shrink-0 drop-shadow-xs" 
+                      />
                       <div>
                         <div className="text-sm font-black">- {lg.name}</div>
                         <div className="text-[10px] text-slate-500 group-hover:text-white/80 font-medium">
@@ -251,9 +253,11 @@ export const MainHubView: React.FC<MainHubViewProps> = ({
                     className="w-full p-3 rounded-2xl bg-white hover:bg-blue-600 hover:text-white text-slate-800 font-bold text-left flex items-center justify-between shadow-2xs border border-blue-200/80 transition-all cursor-pointer group"
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="w-7 h-7 rounded-lg bg-blue-100 group-hover:bg-white group-hover:text-blue-600 text-blue-700 flex items-center justify-center font-extrabold text-xs">
-                        {lg.badgeText}
-                      </span>
+                      <img 
+                        src={`/crests/Logo%20League%20${lg.id === 'League 1' ? '1' : lg.id === 'League 2' ? '2' : '3'}.png`} 
+                        alt={lg.name}
+                        className="w-7 h-9 object-contain shrink-0 drop-shadow-xs" 
+                      />
                       <div>
                         <div className="text-sm font-black">- {lg.name}</div>
                         <div className="text-[10px] text-slate-500 group-hover:text-white/80 font-medium">
@@ -305,9 +309,11 @@ export const MainHubView: React.FC<MainHubViewProps> = ({
                     className="w-full p-3 rounded-2xl bg-white hover:bg-emerald-600 hover:text-white text-slate-800 font-bold text-left flex items-center justify-between shadow-2xs border border-emerald-200/80 transition-all cursor-pointer group"
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="w-7 h-7 rounded-lg bg-emerald-100 group-hover:bg-white group-hover:text-emerald-600 text-emerald-700 flex items-center justify-center font-extrabold text-xs">
-                        {lg.badgeText}
-                      </span>
+                      <img 
+                        src={`/crests/Logo%20League%20${lg.id === 'League 1' ? '1' : lg.id === 'League 2' ? '2' : '3'}.png`} 
+                        alt={lg.name}
+                        className="w-7 h-9 object-contain shrink-0 drop-shadow-xs" 
+                      />
                       <div>
                         <div className="text-sm font-black">- {lg.name}</div>
                         <div className="text-[10px] text-slate-500 group-hover:text-white/80 font-medium">
