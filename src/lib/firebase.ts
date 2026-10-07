@@ -38,7 +38,7 @@ const BACKEND_SHEETS_URL_KEY = 'thaileague_2026_27_backend_sheets_url';
 
 export const DEFAULT_FIREBASE_PROJECT_ID = 'thaileague-2026-27';
 
-import firebaseAppletConfig from '../../firebase-applet-config.json';
+import { FIREBASE_APPLET_CONFIG } from './firebaseConfig';
 
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
@@ -78,7 +78,7 @@ export function initFirebaseService() {
   if (app && db) return { app, db, auth };
 
   const savedConfig = getSavedFirebaseConfig();
-  const configToUse: any = savedConfig?.apiKey ? savedConfig : firebaseAppletConfig;
+  const configToUse: any = savedConfig?.apiKey ? savedConfig : FIREBASE_APPLET_CONFIG;
 
   try {
     if (!getApps().length && configToUse?.apiKey) {
@@ -138,7 +138,7 @@ function notifyListeners() {
   });
 }
 
-// Subscribe to registrations (Real-time)
+// Subscribe to registrations (Real-time across all devices via Cloud Firestore)
 export function subscribeToRegistrations(callback: (records: RegistrationRecord[]) => void): () => void {
   listeners.add(callback);
   // Send current state immediately
@@ -150,13 +150,15 @@ export function subscribeToRegistrations(callback: (records: RegistrationRecord[
 
   if (firestoreDb) {
     try {
-      const q = query(collection(firestoreDb, 'thaileague_registrations'), orderBy('timestamp', 'desc'));
-      unsubscribeFirestore = onSnapshot(q, (snapshot) => {
+      const colRef = collection(firestoreDb, 'thaileague_registrations');
+      unsubscribeFirestore = onSnapshot(colRef, (snapshot) => {
         if (!snapshot.empty) {
           const list: RegistrationRecord[] = [];
           snapshot.forEach((docSnap) => {
             list.push({ ...docSnap.data(), id: docSnap.id } as RegistrationRecord);
           });
+          // Sort descending by timestamp in memory
+          list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
           memoryRecords = list;
           localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
           notifyListeners();
