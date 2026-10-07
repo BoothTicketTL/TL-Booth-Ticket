@@ -4,6 +4,7 @@ import {
   collection, 
   onSnapshot, 
   addDoc, 
+  setDoc,
   updateDoc, 
   deleteDoc, 
   getDocs,
@@ -36,7 +37,32 @@ const LOCAL_MATCH_CONTACTS_KEY = 'thaileague_2026_27_match_contacts';
 const LOCAL_SIM_DATE_KEY = 'thaileague_2026_27_sim_date';
 const BACKEND_SHEETS_URL_KEY = 'thaileague_2026_27_backend_sheets_url';
 
-export const DEFAULT_FIREBASE_PROJECT_ID = 'thaileague-2026-27';
+export const DEFAULT_FIREBASE_PROJECT_ID = 'gen-lang-client-0566054495';
+
+function safeGetItem(key: string): string | null {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(key);
+    }
+  } catch (e) {}
+  return null;
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, value);
+    }
+  } catch (e) {}
+}
+
+function safeRemoveItem(key: string): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(key);
+    }
+  } catch (e) {}
+}
 
 import { FIREBASE_APPLET_CONFIG } from './firebaseConfig';
 
@@ -54,20 +80,47 @@ export interface FirebaseConfigType {
   firestoreDatabaseId?: string;
 }
 
+/**
+ * Recursively cleans any object for Firestore:
+ * Strips `undefined` values and converts undefined fields to null/empty
+ * so Firestore SDK never throws:
+ * "FirebaseError: Function ... called with invalid data. Unsupported field value: undefined"
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return '' as any;
+  }
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeForFirestore(item)) as any;
+  }
+  if (typeof data === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeForFirestore(value);
+      }
+    }
+    return cleaned as T;
+  }
+  return data;
+}
+
 export function getSavedFirebaseConfig(): FirebaseConfigType | null {
   try {
-    const raw = localStorage.getItem(FIREBASE_CONFIG_KEY);
+    const raw = safeGetItem(FIREBASE_CONFIG_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) {
-    console.error('Error reading Firebase config from localStorage', e);
+    console.error('Error reading Firebase config from storage', e);
   }
   return null;
 }
 
 export function saveFirebaseConfig(config: FirebaseConfigType) {
   try {
-    localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(config));
-    window.location.reload();
+    safeSetItem(FIREBASE_CONFIG_KEY, JSON.stringify(config));
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   } catch (e) {
     console.error('Error saving Firebase config', e);
   }
@@ -78,7 +131,10 @@ export function initFirebaseService() {
   if (app && db) return { app, db, auth };
 
   const savedConfig = getSavedFirebaseConfig();
-  const configToUse: any = savedConfig?.apiKey ? savedConfig : FIREBASE_APPLET_CONFIG;
+  // Ensure valid configuration - prioritize official provisioned FIREBASE_APPLET_CONFIG
+  const configToUse: any = (savedConfig?.apiKey && savedConfig?.projectId && savedConfig.projectId !== 'thaileague-2026-27')
+    ? { ...FIREBASE_APPLET_CONFIG, ...savedConfig }
+    : FIREBASE_APPLET_CONFIG;
 
   try {
     if (!getApps().length && configToUse?.apiKey) {
@@ -107,7 +163,7 @@ const listeners: Set<Listener> = new Set();
 
 function getInitialLocalRecords(): RegistrationRecord[] {
   try {
-    const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const data = safeGetItem(LOCAL_STORAGE_KEY);
     if (data !== null) {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed)) {
@@ -118,11 +174,7 @@ function getInitialLocalRecords(): RegistrationRecord[] {
     console.error('Failed to parse records from local storage', e);
   }
   // Store default if not initialized yet
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_REGISTRATIONS));
-  } catch (e) {
-    console.error(e);
-  }
+  safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(INITIAL_REGISTRATIONS));
   return INITIAL_REGISTRATIONS;
 }
 
@@ -138,6 +190,8 @@ function notifyListeners() {
   });
 }
 
+let isFirstFirestoreSyncDone = false;
+
 // Subscribe to registrations (Real-time across all devices via Cloud Firestore)
 export function subscribeToRegistrations(callback: (records: RegistrationRecord[]) => void): () => void {
   listeners.add(callback);
@@ -151,18 +205,55 @@ export function subscribeToRegistrations(callback: (records: RegistrationRecord[
   if (firestoreDb) {
     try {
       const colRef = collection(firestoreDb, 'thaileague_registrations');
-      unsubscribeFirestore = onSnapshot(colRef, (snapshot) => {
-        if (!snapshot.empty) {
-          const list: RegistrationRecord[] = [];
-          snapshot.forEach((docSnap) => {
-            list.push({ ...docSnap.data(), id: docSnap.id } as RegistrationRecord);
-          });
-          // Sort descending by timestamp in memory
-          list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-          memoryRecords = list;
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
-          notifyListeners();
+      unsubscribeFirestore = onSnapshot(colRef, async (snapshot) => {
+        if (!isFirstFirestoreSyncDone && snapshot.empty) {
+          isFirstFirestoreSyncDone = true;
+          // If Firestore is empty on the very first time the database is initialized,
+          // seed the initial mock registrations to Firestore so ALL connected devices have initial data.
+          const alreadyInitialized = safeGetItem('thaileague_firestore_seeded_v1');
+          if (!alreadyInitialized) {
+            safeSetItem('thaileague_firestore_seeded_v1', 'true');
+            for (const item of INITIAL_REGISTRATIONS) {
+              try {
+                await setDoc(doc(firestoreDb, 'thaileague_registrations', item.id), sanitizeForFirestore(item));
+              } catch (err) {
+                console.error('Error seeding initial record to Firestore:', err);
+              }
+            }
+            return;
+          }
         }
+
+        isFirstFirestoreSyncDone = true;
+        const list: RegistrationRecord[] = [];
+        const existingDocIds = new Set<string>();
+        snapshot.forEach((docSnap) => {
+          existingDocIds.add(docSnap.id);
+          list.push({ ...docSnap.data(), id: docSnap.id } as RegistrationRecord);
+        });
+
+        // If local client has records created before Firestore was online (or while offline),
+        // sync them to Firestore so other devices (Admin PC) see them immediately!
+        if (memoryRecords.length > 0) {
+          for (const localRec of memoryRecords) {
+            if (localRec?.id && !existingDocIds.has(localRec.id)) {
+              existingDocIds.add(localRec.id);
+              list.push(localRec);
+              try {
+                await setDoc(doc(firestoreDb, 'thaileague_registrations', localRec.id), sanitizeForFirestore(localRec));
+                console.log('✅ Auto-synced local registration to Firestore:', localRec.id, localRec.matchTitle);
+              } catch (err) {
+                console.warn('Auto-sync local to Firestore warning:', err);
+              }
+            }
+          }
+        }
+
+        // Sort descending by timestamp in memory
+        list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        memoryRecords = list;
+        safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
+        notifyListeners();
       }, (error) => {
         console.warn('Firestore real-time subscription issue, continuing with synchronized local store:', error);
       });
@@ -185,9 +276,10 @@ export async function createRegistration(
 ): Promise<RegistrationRecord> {
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 16).replace('T', ' ');
+  const recordId = `reg-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
   const newRecord: RegistrationRecord = {
     ...data,
-    id: `reg-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+    id: recordId,
     createdAt: dateStr,
     timestamp: Date.now(),
     status: 'pending',
@@ -197,15 +289,16 @@ export async function createRegistration(
   const { db: firestoreDb } = initFirebaseService();
   if (firestoreDb) {
     try {
-      const docRef = await addDoc(collection(firestoreDb, 'thaileague_registrations'), newRecord);
-      newRecord.id = docRef.id;
+      const cleanData = sanitizeForFirestore(newRecord);
+      await setDoc(doc(firestoreDb, 'thaileague_registrations', recordId), cleanData);
+      console.log('✅ Registration successfully saved to Firestore:', recordId);
     } catch (e) {
-      console.warn('Could not save directly to Firestore, saving to local store:', e);
+      console.error('❌ Could not save directly to Firestore, saving to local store:', e);
     }
   }
 
-  memoryRecords = [newRecord, ...memoryRecords];
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
+  memoryRecords = [newRecord, ...memoryRecords.filter(r => r.id !== recordId)];
+  safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
   notifyListeners();
   return newRecord;
 }
@@ -218,17 +311,19 @@ export async function updateRegistration(
   const index = memoryRecords.findIndex(r => r.id === id);
   if (index !== -1) {
     memoryRecords[index] = { ...memoryRecords[index], ...updates };
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
+    safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
     notifyListeners();
   }
 
   const { db: firestoreDb } = initFirebaseService();
   if (firestoreDb) {
     try {
+      const cleanUpdates = sanitizeForFirestore(updates);
       const ref = doc(firestoreDb, 'thaileague_registrations', id);
-      await updateDoc(ref, updates);
+      await setDoc(ref, cleanUpdates, { merge: true });
+      console.log('✅ Registration successfully updated in Firestore:', id);
     } catch (e) {
-      console.warn('Firestore update failed, fallback retained:', e);
+      console.error('❌ Firestore update failed:', e);
     }
   }
 }
@@ -236,7 +331,7 @@ export async function updateRegistration(
 // Delete Registration
 export async function deleteRegistration(id: string): Promise<void> {
   memoryRecords = memoryRecords.filter(r => r.id !== id);
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
+  safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
   notifyListeners();
 
   const { db: firestoreDb } = initFirebaseService();
@@ -244,8 +339,9 @@ export async function deleteRegistration(id: string): Promise<void> {
     try {
       const ref = doc(firestoreDb, 'thaileague_registrations', id);
       await deleteDoc(ref);
+      console.log('✅ Registration deleted in Firestore:', id);
     } catch (e) {
-      console.warn('Firestore delete failed:', e);
+      console.error('❌ Firestore delete failed:', e);
     }
   }
 }
@@ -258,7 +354,7 @@ export async function deleteAllRegistrations(idsToDelete?: string[]): Promise<vo
   } else {
     memoryRecords = [];
   }
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
+  safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
   notifyListeners();
 
   const { db: firestoreDb } = initFirebaseService();
@@ -274,7 +370,7 @@ export async function deleteAllRegistrations(idsToDelete?: string[]): Promise<vo
         await Promise.allSettled(batchPromises);
       }
     } catch (e) {
-      console.warn('Firestore deleteAll error:', e);
+      console.error('❌ Firestore deleteAll error:', e);
     }
   }
 }
@@ -282,7 +378,7 @@ export async function deleteAllRegistrations(idsToDelete?: string[]): Promise<vo
 // Reset data to defaults
 export function resetToMockData(): void {
   memoryRecords = [...INITIAL_REGISTRATIONS];
-  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
+  safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
   notifyListeners();
 }
 
@@ -348,16 +444,14 @@ function getInitialMatchContacts(): MatchStadiumContact[] {
   INITIAL_MATCH_CONTACTS.forEach(c => map.set(c.id, c));
 
   try {
-    const raw = localStorage.getItem(LOCAL_MATCH_CONTACTS_KEY);
+    const raw = safeGetItem(LOCAL_MATCH_CONTACTS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         // Automatically prune and deduplicate contacts so orphan duplicates are removed
         const cleanList = deduplicateMatchContacts(parsed);
         if (cleanList.length !== parsed.length) {
-          try {
-            localStorage.setItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(cleanList));
-          } catch (e) {}
+          safeSetItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(cleanList));
         }
         return cleanList;
       }
@@ -397,7 +491,7 @@ export function subscribeToMatchContacts(callback: (contacts: MatchStadiumContac
             list.push({ ...docSnap.data(), id: docSnap.id } as MatchStadiumContact);
           });
           memoryMatchContacts = list;
-          localStorage.setItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(list));
+          safeSetItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(list));
           notifyMatchContactListeners();
         }
       }, (error) => {
@@ -435,16 +529,14 @@ export async function saveMatchContact(contactData: Omit<MatchStadiumContact, 'i
     memoryMatchContacts.push(updatedContact);
   }
 
-  localStorage.setItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(memoryMatchContacts));
+  safeSetItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(memoryMatchContacts));
   notifyMatchContactListeners();
 
   const { db: firestoreDb } = initFirebaseService();
   if (firestoreDb) {
     try {
       const ref = doc(firestoreDb, 'thaileague_match_contacts', contactId);
-      await updateDoc(ref, updatedContact as any).catch(async () => {
-        await addDoc(collection(firestoreDb, 'thaileague_match_contacts'), updatedContact);
-      });
+      await setDoc(ref, sanitizeForFirestore(updatedContact), { merge: true });
     } catch (e) {
       console.warn('Firestore match contact save fallback used:', e);
     }
@@ -551,11 +643,7 @@ export async function saveMultipleMatchContacts(
     memoryMatchContacts = deduplicateMatchContacts([...memoryMatchContacts, ...cleanUpdated]);
   }
 
-  try {
-    localStorage.setItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(memoryMatchContacts));
-  } catch (e) {
-    console.error('Error saving match contacts to localStorage', e);
-  }
+  safeSetItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(memoryMatchContacts));
   notifyMatchContactListeners();
 
   const { db: firestoreDb } = initFirebaseService();
@@ -563,9 +651,7 @@ export async function saveMultipleMatchContacts(
     try {
       for (const item of cleanUpdated) {
         const ref = doc(firestoreDb, 'thaileague_match_contacts', item.id);
-        await updateDoc(ref, item as any).catch(async () => {
-          await addDoc(collection(firestoreDb, 'thaileague_match_contacts'), item);
-        });
+        await setDoc(ref, sanitizeForFirestore(item), { merge: true });
       }
     } catch (e) {
       console.warn('Firestore bulk contact save warning:', e);
@@ -581,7 +667,7 @@ export function getMatchContacts(): MatchStadiumContact[] {
 
 export async function deleteMatchContact(id: string): Promise<void> {
   memoryMatchContacts = memoryMatchContacts.filter(c => c.id !== id);
-  localStorage.setItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(memoryMatchContacts));
+  safeSetItem(LOCAL_MATCH_CONTACTS_KEY, JSON.stringify(memoryMatchContacts));
   notifyMatchContactListeners();
 
   const { db: firestoreDb } = initFirebaseService();
@@ -597,7 +683,7 @@ export async function deleteMatchContact(id: string): Promise<void> {
 // Google Sheets Backend URL Integration
 export function getBackendSheetsUrl(): string {
   try {
-    const saved = localStorage.getItem(BACKEND_SHEETS_URL_KEY);
+    const saved = safeGetItem(BACKEND_SHEETS_URL_KEY);
     if (saved) return saved;
   } catch (e) {
     console.error(e);
@@ -606,11 +692,7 @@ export function getBackendSheetsUrl(): string {
 }
 
 export function saveBackendSheetsUrl(url: string): void {
-  try {
-    localStorage.setItem(BACKEND_SHEETS_URL_KEY, url.trim());
-  } catch (e) {
-    console.error(e);
-  }
+  safeSetItem(BACKEND_SHEETS_URL_KEY, url.trim());
 }
 
 // =========================================================================
@@ -621,7 +703,7 @@ const dateListeners: Set<DateListener> = new Set();
 
 function getInitialSimDate(): string {
   try {
-    const raw = localStorage.getItem(LOCAL_SIM_DATE_KEY);
+    const raw = safeGetItem(LOCAL_SIM_DATE_KEY);
     if (raw) return raw;
   } catch (e) {
     console.error(e);
@@ -658,21 +740,21 @@ export function advanceSimulatedDate(days: number = 7): string {
   cur.setDate(cur.getDate() + days);
   const nextDateStr = cur.toISOString().slice(0, 10);
   currentSimulatedDate = nextDateStr;
-  localStorage.setItem(LOCAL_SIM_DATE_KEY, nextDateStr);
+  safeSetItem(LOCAL_SIM_DATE_KEY, nextDateStr);
   notifyDateListeners();
   return nextDateStr;
 }
 
 export function setSimulatedDate(newDate: string): string {
   currentSimulatedDate = newDate;
-  localStorage.setItem(LOCAL_SIM_DATE_KEY, newDate);
+  safeSetItem(LOCAL_SIM_DATE_KEY, newDate);
   notifyDateListeners();
   return newDate;
 }
 
 export function resetSimulatedDate(): string {
   currentSimulatedDate = CURRENT_SIMULATED_DATE;
-  localStorage.setItem(LOCAL_SIM_DATE_KEY, CURRENT_SIMULATED_DATE);
+  safeSetItem(LOCAL_SIM_DATE_KEY, CURRENT_SIMULATED_DATE);
   notifyDateListeners();
   return CURRENT_SIMULATED_DATE;
 }
@@ -680,7 +762,7 @@ export function resetSimulatedDate(): string {
 // Current User State & Gmail Login
 let currentUserProfile: UserProfile | null = (() => {
   try {
-    const raw = localStorage.getItem(LOCAL_USER_KEY);
+    const raw = safeGetItem(LOCAL_USER_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) {
     console.error(e);
@@ -728,7 +810,7 @@ export async function signInWithGoogle(customEmail?: string, customName?: string
         assignedBrand,
       };
       currentUserProfile = profile;
-      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(profile));
+      safeSetItem(LOCAL_USER_KEY, JSON.stringify(profile));
       notifyAuthListeners();
       return profile;
     } catch (e) {
@@ -756,7 +838,7 @@ export async function signInWithGoogle(customEmail?: string, customName?: string
   };
 
   currentUserProfile = profile;
-  localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(profile));
+  safeSetItem(LOCAL_USER_KEY, JSON.stringify(profile));
   notifyAuthListeners();
   return profile;
 }
@@ -776,7 +858,7 @@ export function switchUserRole(targetRole?: 'admin' | 'user'): UserProfile | nul
       assignedBrand: 'BYD',
     };
     currentUserProfile = defaultProfile;
-    localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(defaultProfile));
+    safeSetItem(LOCAL_USER_KEY, JSON.stringify(defaultProfile));
     notifyAuthListeners();
     return defaultProfile;
   }
@@ -787,7 +869,7 @@ export function switchUserRole(targetRole?: 'admin' | 'user'): UserProfile | nul
     role: nextRole,
     assignedBrand: nextRole === 'admin' ? 'All' : (currentUserProfile.assignedBrand && currentUserProfile.assignedBrand !== 'All' ? currentUserProfile.assignedBrand : 'BYD'),
   };
-  localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(currentUserProfile));
+  safeSetItem(LOCAL_USER_KEY, JSON.stringify(currentUserProfile));
   notifyAuthListeners();
   return currentUserProfile;
 }
@@ -806,7 +888,7 @@ export function refreshCurrentUserRoleAndBrand(): void {
       displayName: roleCheck.displayName || currentUserProfile.displayName,
       organization: roleCheck.organization || currentUserProfile.organization,
     };
-    localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(currentUserProfile));
+    safeSetItem(LOCAL_USER_KEY, JSON.stringify(currentUserProfile));
     notifyAuthListeners();
   }
 }
@@ -821,7 +903,7 @@ export async function signOutUser(): Promise<void> {
     }
   }
   currentUserProfile = null;
-  localStorage.removeItem(LOCAL_USER_KEY);
+  safeRemoveItem(LOCAL_USER_KEY);
   notifyAuthListeners();
 }
 

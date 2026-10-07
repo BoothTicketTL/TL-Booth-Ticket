@@ -938,7 +938,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
           ticketRequired: ticketActive,
           ticketQuantity: ticketActive ? (Number(entry.ticketQuantity) || 0) : 0,
           ticketRequesterPhone: ticketActive ? entry.ticketRequesterPhone.trim() : '-',
-          remark: entry.remark?.trim() || undefined,
+          remark: entry.remark?.trim() || '',
           season: activeSeason || getSeasonFromDate(fixture.matchDate || fixture.month),
           adminNote: `ลงทะเบียนผ่านระบบ ฤดูกาล ${activeSeason} (แบรนด์: ${selectedBrand})${isOverSeasonTicketQuota && ticketActive ? ` [บัตรเกินโควต้าฤดูกาล: ต้องซื้อเพิ่มจากสโมสร]` : ''}`,
         });

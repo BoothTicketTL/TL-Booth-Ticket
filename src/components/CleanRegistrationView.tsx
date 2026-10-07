@@ -383,7 +383,7 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
         ticketQuantity: Number(entry.ticketQuantity) || 0,
         ticketRequesterName: hasTickets ? (entry.dealerName.trim() || applicantName) : '-',
         ticketRequesterPhone: hasTickets ? (entry.ticketRequesterPhone.trim() || applicantPhone) : '-',
-        remark: entry.remark.trim() || undefined,
+        remark: entry.remark.trim() || '',
         status: (existing ? existing.status : 'pending') as const,
       };
 

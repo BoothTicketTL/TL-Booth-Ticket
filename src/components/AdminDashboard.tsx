@@ -211,7 +211,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await updateRegistration(id, {
         status: newStatus,
         adminNote: note !== undefined ? note : (newStatus === 'approved' ? 'อนุมัติเรียบร้อยโดยแอดมิน' : 'ไม่ผ่านการอนุมัติ'),
-        approvedAt: newStatus === 'approved' ? new Date().toISOString().slice(0, 16).replace('T', ' ') : undefined,
+        approvedAt: newStatus === 'approved' ? new Date().toISOString().slice(0, 16).replace('T', ' ') : '',
         reviewedBy: 'Admin Thaileague 2026-27',
       });
       if (selectedRecord && selectedRecord.id === id) {
