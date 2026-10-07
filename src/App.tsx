@@ -29,6 +29,7 @@ import {
   switchUserRole
 } from './lib/firebase';
 import { initFixturesAutoSync } from './lib/fixturesService';
+import { checkUserRoleByEmail } from './lib/userManagementService';
 import { initContactsAutoSync } from './lib/stadiumContactsService';
 
 export default function App() {
@@ -38,6 +39,9 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [viewMode, setViewMode] = useState<'hub' | 'content'>('hub');
   const [roleToast, setRoleToast] = useState<string | null>(null);
+  // เฉพาะแอดมินตัวจริง (เป็น Admin ในรายชื่อผู้ใช้) เท่านั้นที่เห็นปุ่มสลับบทบาท
+  // ใช้สิทธิ์จากอีเมลในรายชื่อผู้ใช้ ไม่ใช้สิทธิ์ที่แสดงอยู่ตอนนี้ แอดมินที่สลับไปมุมมอง User จึงยังเห็นปุ่มเพื่อสลับกลับได้
+  const canSwitchRole = !!currentUser?.email && checkUserRoleByEmail(currentUser.email).role === 'admin';
 
   // Modals
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -129,7 +133,7 @@ export default function App() {
         onSelectFeatureAndLeague={handleSelectFeatureAndLeague}
         onOpenAdmin={handleOpenAdminFromHub}
         onSignOut={handleSignOut}
-        onSwitchRole={handleSwitchRole}
+        onSwitchRole={canSwitchRole ? handleSwitchRole : undefined}
       />
     );
   }
@@ -147,7 +151,7 @@ export default function App() {
           setActiveTab('admin');
           setViewMode('content');
         }}
-        onSwitchRole={handleSwitchRole}
+        onSwitchRole={canSwitchRole ? handleSwitchRole : undefined}
       />
     );
   }
@@ -165,7 +169,7 @@ export default function App() {
           setActiveTab('admin');
           setViewMode('content');
         }}
-        onSwitchRole={handleSwitchRole}
+        onSwitchRole={canSwitchRole ? handleSwitchRole : undefined}
         onNavigateToRegister={(league) => {
           setActiveTab('register');
           if (league) setSelectedLeagueFilter(league);
@@ -186,7 +190,7 @@ export default function App() {
           setActiveTab('admin');
           setViewMode('content');
         }}
-        onSwitchRole={handleSwitchRole}
+        onSwitchRole={canSwitchRole ? handleSwitchRole : undefined}
       />
     );
   }
@@ -227,7 +231,7 @@ export default function App() {
           currentUser={currentUser}
           onOpenLoginModal={() => setIsLoginModalOpen(true)}
           onSignOut={handleSignOut}
-          onSwitchRole={handleSwitchRole}
+          onSwitchRole={canSwitchRole ? handleSwitchRole : undefined}
           isRealtimeConnected={true}
           onResetData={handleResetData}
           onGoToHub={() => setViewMode('hub')}
