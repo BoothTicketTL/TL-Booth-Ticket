@@ -23,23 +23,28 @@ export const LeagueBadge: React.FC<LeagueBadgeProps> = ({
   className = ''
 }) => {
   const [logoUrl, setLogoUrl] = useState<string>(() => getLeagueLogo(league));
+  const [imgError, setImgError] = useState(false);
 
   useEffect(() => {
     setLogoUrl(getLeagueLogo(league));
+    setImgError(false);
     const unsub = subscribeToLeagueLogos(() => {
       setLogoUrl(getLeagueLogo(league));
+      setImgError(false);
     });
     return () => unsub();
   }, [league]);
 
   const sizeClass = SIZE_CONFIGS[size] || SIZE_CONFIGS.md;
+  const activeSrc = imgError ? DEFAULT_LEAGUE_SVG_DATA_URLS[league] : logoUrl;
 
   return (
     <div className={`inline-flex items-center justify-center shrink-0 drop-shadow-md select-none transition-transform hover:scale-105 ${sizeClass} ${className}`}>
       <img
-        src={logoUrl}
+        src={activeSrc}
         alt={`Official ${league} Logo`}
         className="w-full h-full object-contain"
+        onError={() => setImgError(true)}
         loading="lazy"
       />
     </div>

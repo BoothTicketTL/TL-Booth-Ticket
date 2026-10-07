@@ -94,18 +94,46 @@ export const ClubCrest: React.FC<ClubCrestProps> = ({
   showTooltip = false
 }) => {
   const [crestUrl, setCrestUrl] = useState<string | null>(() => getClubCrest(clubName, league));
+  const [triedFlatFallback, setTriedFlatFallback] = useState(false);
   const [imgError, setImgError] = useState(false);
 
   // Subscribe to changes in crest database (e.g. when an admin uploads a new crest)
   useEffect(() => {
     setCrestUrl(getClubCrest(clubName, league));
+    setTriedFlatFallback(false);
     setImgError(false);
 
     const unsub = subscribeToClubCrests(() => {
       setCrestUrl(getClubCrest(clubName, league));
+      setTriedFlatFallback(false);
+      setImgError(false);
     });
     return () => unsub();
   }, [clubName, league]);
+
+  const handleImageError = () => {
+    if (!crestUrl) {
+      setImgError(true);
+      return;
+    }
+    // If failed as .jpg in subfolder, try .png in that subfolder
+    if (crestUrl.endsWith('.jpg') && crestUrl.includes('%E0%B8%AA%E0%B9%82%E0%B8%A1%E0%B8%A8%E0%B8%A3%E0%B9%84%E0%B8%97%E0%B8%A2%E0%B8%A5%E0%B8%B5%E0%B8%81')) {
+      setCrestUrl(crestUrl.replace(/\.jpg$/, '.png'));
+      return;
+    }
+    // If subfolder failed, try flat /crests/{clubName}.jpg
+    if (!triedFlatFallback) {
+      setTriedFlatFallback(true);
+      setCrestUrl(`/crests/${encodeURIComponent(clubName.trim())}.jpg`);
+      return;
+    }
+    // If flat .jpg failed, try flat .png
+    if (crestUrl.endsWith('.jpg')) {
+      setCrestUrl(`/crests/${encodeURIComponent(clubName.trim())}.png`);
+      return;
+    }
+    setImgError(true);
+  };
 
   const cfg = SIZE_CONFIGS[size] || SIZE_CONFIGS.md;
   const initials = getClubInitials(clubName);
@@ -121,7 +149,7 @@ export const ClubCrest: React.FC<ClubCrestProps> = ({
           src={crestUrl}
           alt={clubName}
           className={`${cfg.img} object-contain p-0.5`}
-          onError={() => setImgError(true)}
+          onError={handleImageError}
           loading="lazy"
         />
       </div>

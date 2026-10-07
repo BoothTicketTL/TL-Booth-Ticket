@@ -127,6 +127,13 @@ if (typeof window !== 'undefined') {
   initClubCrestService().catch(e => console.warn('Crest service init deferred:', e));
 }
 
+function getLeagueFolderName(league?: LeagueType): string {
+  if (league === 'League 1') return 'สโมสรไทยลีก 1';
+  if (league === 'League 2') return 'สโมสรไทยลีก 2';
+  if (league === 'League 3') return 'สโมสรไทยลีก 3';
+  return '';
+}
+
 /**
  * Synchronous crest getter (instant UI rendering from memory cache)
  */
@@ -159,7 +166,15 @@ export function getClubCrest(clubName?: string, leagueHint?: LeagueType): string
     }
   }
 
-  return null;
+  // 4. Match with the user's uploaded structure in public/crests/:
+  // Priority A: /crests/สโมสรไทยลีก {1|2|3}/{clubName}.jpg
+  const folder = getLeagueFolderName(resolvedLeague);
+  if (folder) {
+    return `/crests/${encodeURIComponent(folder)}/${encodeURIComponent(resolvedName)}.jpg`;
+  }
+
+  // Priority B: /crests/{clubName}.jpg
+  return `/crests/${encodeURIComponent(resolvedName)}.jpg`;
 }
 
 /**
