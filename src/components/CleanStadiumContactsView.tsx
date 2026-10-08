@@ -330,47 +330,52 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     return `แมตช์วันที่ ${cycle.formattedRange}`;
   }, [cycle]);
 
-  // Filter matches for the selected league for the Friday-to-Thursday match cycle (e.g. 9-15 ต.ค. 2569)
+  // Admin keeps the existing Friday-to-Thursday management cycle.
+  // User view is intentionally NOT limited by that weekly window.
   const displayedMatches = useMemo(() => {
     const leagueMatches = fixtures.filter(f => f.league === selectedLeague);
     if (leagueMatches.length === 0) return [];
 
-    // Filter to matches within Friday-Thursday cycle (inclusive)
-    let weekMatches = leagueMatches.filter(f => {
-      const matchDateStr = f.matchDate;
-      return matchDateStr >= cycle.fridayStr && matchDateStr <= cycle.thursdayStr;
-    });
+    let weekMatches = leagueMatches.filter(f =>
+      f.matchDate >= cycle.fridayStr && f.matchDate <= cycle.thursdayStr
+    );
 
-    // If no matches fall strictly in this cycle, fallback to nearest matches
     if (weekMatches.length === 0) {
       const refTime = new Date(cycle.fridayStr).getTime();
-      const sortedByProximity = [...leagueMatches].sort((a, b) => {
-        const diffA = Math.abs(new Date(a.matchDate).getTime() - refTime);
-        const diffB = Math.abs(new Date(b.matchDate).getTime() - refTime);
-        return diffA - diffB;
-      });
-
+      const sortedByProximity = [...leagueMatches].sort((a, b) =>
+        Math.abs(new Date(a.matchDate).getTime() - refTime) -
+        Math.abs(new Date(b.matchDate).getTime() - refTime)
+      );
       if (sortedByProximity.length > 0) {
         const targetWeek = sortedByProximity[0].matchWeek;
         weekMatches = leagueMatches.filter(f => f.matchWeek === targetWeek);
       }
     }
 
-    // Align League 3 dates so that matches fall on the exact same weekend as League 1 & 2
-    const alignedMatches = weekMatches.map(f => {
-      if (f.league === 'League 3' && f.matchDate === '2026-10-12') {
-        return { ...f, matchDate: '2026-10-11' };
-      }
-      return f;
-    });
-
-    // Sort chronologically by date and kickoff time
-    return alignedMatches.sort((a, b) => {
-      const dateCompare = (a.matchDate || '').localeCompare(b.matchDate || '');
-      if (dateCompare !== 0) return dateCompare;
-      return (a.matchTime || '').localeCompare(b.matchTime || '');
-    });
+    return [...weekMatches].sort((a, b) =>
+      (a.matchDate || '').localeCompare(b.matchDate || '') ||
+      (a.matchTime || '').localeCompare(b.matchTime || '')
+    );
   }, [fixtures, selectedLeague, cycle]);
+
+  // All matches registered by the active brand, regardless of the current match week.
+  // For User view:
+  // 1) only registered matches are shown
+  // 2) today's match is still shown, but disappears after its match date
+  // 3) confirmation controls whether the card shows "รอแอดมินยืนยัน..." or the contact data
+  const realTodayTH = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
+  const userToday = currentUser?.role === 'admin' ? simDate : realTodayTH;
+
+  const userRegisteredMatches = useMemo(() => {
+    return fixtures
+      .filter(f => f.league === selectedLeague)
+      .filter(f => !!f.matchDate && f.matchDate >= userToday)
+      .filter(f => getBrandBoothAndTicketStatus(f, activeBrand).hasRegistered)
+      .sort((a, b) =>
+        (a.matchDate || '').localeCompare(b.matchDate || '') ||
+        (a.matchTime || '').localeCompare(b.matchTime || '')
+      );
+  }, [fixtures, selectedLeague, activeBrand, allRecords, userToday]);
 
   // Matches where activeBrand has requested booth or tickets
   const brandRegisteredMatches = useMemo(() => {
@@ -391,18 +396,19 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     }
   }, [brandRegisteredMatches.length, currentUser?.role]);
 
-  // Final matches list based on filter tabs
+  // Final list:
+  // - Admin direct view: existing weekly management list
+  // - User / Admin previewing as User: all registered future/current matches, not weekly-limited
   const filteredMatchesList = useMemo(() => {
-    const isAdminDirect = currentUser?.role === 'admin' && !adminViewAsUser;
-    let list = (filterMode === 'registered_only' && !isAdminDirect)
-      ? brandRegisteredMatches
-      : displayedMatches;
+    const isAdminDirectView = currentUser?.role === 'admin' && !adminViewAsUser;
+    let list = isAdminDirectView ? displayedMatches : userRegisteredMatches;
 
-    if (hideFinishedMatches) {
+    if (isAdminDirectView && hideFinishedMatches) {
       list = list.filter(m => !(simDate && m.matchDate && simDate > m.matchDate));
     }
+
     return list;
-  }, [filterMode, brandRegisteredMatches, displayedMatches, hideFinishedMatches, simDate, adminViewAsUser, currentUser?.role]);
+  }, [currentUser?.role, adminViewAsUser, displayedMatches, userRegisteredMatches, hideFinishedMatches, simDate]);
 
   // Admin: Sync stadium contacts from official Google Sheet
   const handleSyncContactsSheet = async () => {
