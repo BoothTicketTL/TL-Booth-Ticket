@@ -6,6 +6,7 @@ import {
   OFFICIAL_CLUBS_BY_LEAGUE,
   getCanonicalOfficialClub
 } from '../data/officialSeasonClubs';
+import { STATIC_CREST_MAP } from '../data/crestFiles';
 
 export interface ClubCrestItem {
   league: LeagueType;
@@ -182,13 +183,29 @@ export function getClubCrest(clubName?: string, leagueHint?: LeagueType): string
   // 3. Normalized search in memory cache
   for (const [id, item] of memoryCrestCache.entries()) {
     if (item.clubName === resolvedName || item.clubName.includes(resolvedName) || resolvedName.includes(item.clubName)) {
-      if (item.dataUrl) return item.dataUrl;
+      if (item?.dataUrl) return item.dataUrl;
     }
   }
 
-  // 4. Match with the user's uploaded structure in public/crests/:
-  // Resolve known filename variation (e.g. ลำพูน วอร์ริเออร์ -> ลำพูน วอริเออร์)
-  const fileBaseName = getKnownCrestFileName(resolvedName);
+  // 4. Exact and alias lookup in verified STATIC_CREST_MAP (100% verified files)
+  if (STATIC_CREST_MAP[resolvedName]) {
+    return STATIC_CREST_MAP[resolvedName];
+  }
+  if (STATIC_CREST_MAP[raw]) {
+    return STATIC_CREST_MAP[raw];
+  }
+  const knownName = getKnownCrestFileName(resolvedName);
+  if (STATIC_CREST_MAP[knownName]) {
+    return STATIC_CREST_MAP[knownName];
+  }
+  for (const [k, url] of Object.entries(STATIC_CREST_MAP)) {
+    if (k === resolvedName || resolvedName.includes(k) || k.includes(resolvedName)) {
+      return url;
+    }
+  }
+
+  // 5. Match with the user's uploaded structure in public/crests/:
+  const fileBaseName = knownName;
   const folder = getLeagueFolderName(resolvedLeague);
 
   // Priority A: /crests/สโมสรไทยลีก {1|2|3}/{fileBaseName}.jpg
@@ -196,8 +213,8 @@ export function getClubCrest(clubName?: string, leagueHint?: LeagueType): string
     return `/crests/${encodeURIComponent(folder)}/${encodeURIComponent(fileBaseName)}.jpg`;
   }
 
-  // Priority B: /crests/{fileBaseName}.jpg
-  return `/crests/${encodeURIComponent(fileBaseName)}.jpg`;
+  // Priority B: /crests/{fileBaseName}.png or .jpg
+  return `/crests/${encodeURIComponent(fileBaseName)}.png`;
 }
 
 /**

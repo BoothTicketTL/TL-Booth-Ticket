@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LeagueType } from '../../types';
-import { getLeagueLogo, subscribeToLeagueLogos } from '../../lib/leagueLogoService';
+import { getLeagueLogo, subscribeToLeagueLogos, DEFAULT_LEAGUE_SVG_DATA_URLS } from '../../lib/leagueLogoService';
 
 interface LeagueBadgeProps {
   league: LeagueType;

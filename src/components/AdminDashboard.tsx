@@ -1009,9 +1009,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                         <button
                           id={`btn-delete-${rec.id}`}
-                          onClick={() => handleDelete(rec.id)}
-                          title="ลบข้อมูล"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(rec.id);
+                          }}
+                          title="ลบข้อมูลคำขอลงทะเบียน"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

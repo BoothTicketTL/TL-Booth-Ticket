@@ -372,7 +372,30 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     });
   }, [fixtures, selectedLeague, cycle]);
 
-  // Matches where activeBrand has requested booth or tickets
+  // User Requirement 2:
+  // "ในหน้าเบอร์ติดต่อมุมมอง User ถ้า User ไม่ได้ลงทะเบียนขอออกบูธรับบัตรในแมตช์แข่งขันนั้นมา ไม่ต้องขึ้นโชว์ชื่อแมตช์แข่งขันนั้นเลยในหน้าเบอร์ติดต่อ
+  // และให้ขึ้นเบอร์ติดต่อแมตช์ที่ลงทะเบียนมาทุกแมตช์หลังจากแอดมินกดยืนยันเบอร์แล้ว ไม่ต้องจำกัดวันที่แบบหน้าตารางแข่งขัน แต่พอหมดวันแข่งขันนั้นให้เบอร์ติดต่อแมตช์นั้นๆหายไปเองอัตโนมัติ"
+  
+  // 1. Matches where activeBrand has requested booth or tickets across all dates in this league
+  const brandRegisteredMatchesAllSeason = useMemo(() => {
+    const leagueMatches = fixtures.filter(f => f.league === selectedLeague);
+    return leagueMatches.filter(m => {
+      const status = getBrandBoothAndTicketStatus(m, activeBrand);
+      if (!status.hasRegistered) return false;
+
+      // Automatically hide once match date is over: "แต่พอหมดวันแข่งขันนั้นให้เบอร์ติดต่อแมตช์นั้นๆหายไปเองอัตโนมัติ"
+      if (simDate && m.matchDate && simDate > m.matchDate) {
+        return false;
+      }
+      return true;
+    }).sort((a, b) => {
+      const dateCompare = (a.matchDate || '').localeCompare(b.matchDate || '');
+      if (dateCompare !== 0) return dateCompare;
+      return (a.matchTime || '').localeCompare(b.matchTime || '');
+    });
+  }, [fixtures, selectedLeague, activeBrand, allRecords, simDate]);
+
+  // Registered matches in this current week cycle (for Admin reference)
   const brandRegisteredMatches = useMemo(() => {
     return displayedMatches.filter(m => {
       const status = getBrandBoothAndTicketStatus(m, activeBrand);
@@ -380,29 +403,26 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     });
   }, [displayedMatches, activeBrand, allRecords]);
 
-  // When active brand or displayed matches change, smartly adjust filterMode for regular User
-  useEffect(() => {
-    if (currentUser?.role !== 'admin') {
-      if (brandRegisteredMatches.length > 0) {
-        setFilterMode('registered_only');
-      } else {
-        setFilterMode('all');
-      }
-    }
-  }, [brandRegisteredMatches.length, currentUser?.role]);
+  // Is User View (true for normal user, or admin when testing User View)
+  const isUserView = currentUser?.role !== 'admin' || adminViewAsUser;
 
-  // Final matches list based on filter tabs
+  // Final matches list based on user mode
   const filteredMatchesList = useMemo(() => {
-    const isAdminDirect = currentUser?.role === 'admin' && !adminViewAsUser;
-    let list = (filterMode === 'registered_only' && !isAdminDirect)
-      ? brandRegisteredMatches
+    if (isUserView) {
+      // In User view: ONLY show matches that the user registered for, across all season dates, with expired matches automatically hidden!
+      return brandRegisteredMatchesAllSeason;
+    }
+
+    // In Admin view:
+    let list = (filterMode === 'registered_only')
+      ? brandRegisteredMatchesAllSeason
       : displayedMatches;
 
     if (hideFinishedMatches) {
       list = list.filter(m => !(simDate && m.matchDate && simDate > m.matchDate));
     }
     return list;
-  }, [filterMode, brandRegisteredMatches, displayedMatches, hideFinishedMatches, simDate, adminViewAsUser, currentUser?.role]);
+  }, [isUserView, brandRegisteredMatchesAllSeason, filterMode, displayedMatches, hideFinishedMatches, simDate]);
 
   // Admin: Sync stadium contacts from official Google Sheet
   const handleSyncContactsSheet = async () => {
@@ -660,68 +680,85 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
             <LeagueBadge league={selectedLeague} size="xl" />
           </div>
 
-          {/* Title: เบอร์ติดต่อเจ้าหน้าที่สนาม แมตช์วันที่ 9-15 ต.ค.2569 (เป๊ะเท่ากันทั้ง 3 ลีก) */}
+          {/* Title: เบอร์ติดต่อเจ้าหน้าที่สนาม */}
           <div className="space-y-1">
             <h2 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight">
-              เบอร์ติดต่อเจ้าหน้าที่สนาม {weekRangeText}
+              {isUserView 
+                ? `เบอร์ติดต่อเจ้าหน้าที่สนาม (เฉพาะแมตช์ที่ ${activeBrand} ขอออกบูธ/รับบัตรไว้)`
+                : `เบอร์ติดต่อเจ้าหน้าที่สนาม ${weekRangeText}`}
             </h2>
             <p className="text-xs sm:text-sm font-semibold text-slate-500">
-              จุดรับตั๋วและพิกัดผู้ประสานงานสำหรับออกบูธและรับบัตรดูบอล (ข้อมูลยืนยันอย่างเป็นทางการ)
+              {isUserView
+                ? `แสดงเบอร์ติดต่อและจุดรับบัตรเฉพาะแมตช์ที่ลงทะเบียนไว้ หลังจากแอดมินกดยืนยันแล้ว (เมื่อหมดวันแข่งจะซ่อนอัตโนมัติ)`
+                : `จุดรับตั๋วและพิกัดผู้ประสานงานสำหรับออกบูธและรับบัตรดูบอล (ข้อมูลยืนยันอย่างเป็นทางการ)`}
             </p>
           </div>
         </div>
 
-        {/* View Filter Tabs: User Requirement */}
-        {/* "หน้าเบอร์ติดต่อสนามจะขึ้นเบอร์ติดต่อเฉพาะแมตช์ที่ลูกค้าแต่ละแบรนด์ขอออกบูธรับบัตรไว้" */}
+        {/* View Filter Tabs: User Requirement 2 */}
+        {/* "ถ้า User ไม่ได้ลงทะเบียนขอออกบูธรับบัตรในแมตช์แข่งขันนั้นมา ไม่ต้องขึ้นโชว์ชื่อแมตช์แข่งขันนั้นเลยในหน้าเบอร์ติดต่อ และให้ขึ้นเบอร์ติดต่อแมตช์ที่ลงทะเบียนมาทุกแมตช์หลังจากแอดมินกดยืนยันเบอร์แล้ว ไม่ต้องจำกัดวันที่แบบหน้าตารางแข่งขัน แต่พอหมดวันแข่งขันนั้นให้เบอร์ติดต่อแมตช์นั้นๆหายไปเองอัตโนมัติ" */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 pb-2 border-b border-slate-200/80">
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => setFilterMode('registered_only')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
-                filterMode === 'registered_only'
-                  ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400'
-                  : 'bg-white/90 text-slate-700 hover:bg-emerald-50 border border-slate-200'
-              }`}
-              title="แสดงเฉพาะแมตช์ที่แบรนด์นี้ได้ลงทะเบียนขอออกบูธหรือขอรับสิทธิ์ตั๋วไว้"
-            >
-              <span>⭐ แมตช์ที่ {activeBrand} ขอออกบูธ/รับบัตรไว้</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                filterMode === 'registered_only' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
-              }`}>
-                {brandRegisteredMatches.length}
-              </span>
-            </button>
+            {isUserView ? (
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-black shadow-sm ring-2 ring-emerald-400">
+                <span>⭐ แมตช์ที่ {activeBrand} ขอออกบูธ/รับบัตรไว้ ({selectedLeague})</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">
+                  {brandRegisteredMatchesAllSeason.length} แมตช์
+                </span>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setFilterMode('registered_only')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+                    filterMode === 'registered_only'
+                      ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400'
+                      : 'bg-white/90 text-slate-700 hover:bg-emerald-50 border border-slate-200'
+                  }`}
+                  title="แสดงเฉพาะแมตช์ที่แบรนด์นี้ได้ลงทะเบียนขอออกบูธหรือขอรับสิทธิ์ตั๋วไว้"
+                >
+                  <span>⭐ แมตช์ที่ {activeBrand} ขอออกบูธ/รับบัตรไว้</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                    filterMode === 'registered_only' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {brandRegisteredMatchesAllSeason.length}
+                  </span>
+                </button>
 
-            <button
-              type="button"
-              onClick={() => setFilterMode('all')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
-                filterMode === 'all'
-                  ? 'bg-slate-900 text-white shadow-sm'
-                  : 'bg-white/90 text-slate-700 hover:bg-slate-100 border border-slate-200'
-              }`}
-              title="แสดงโปรแกรมการแข่งขันทุกคู่ในรอบสัปดาห์นี้"
-            >
-              <span>📋 โปรแกรมทุกคู่ในสัปดาห์นี้</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                filterMode === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
-              }`}>
-                {displayedMatches.length}
-              </span>
-            </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterMode('all')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+                    filterMode === 'all'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white/90 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                  title="แสดงโปรแกรมการแข่งขันทุกคู่ในรอบสัปดาห์นี้"
+                >
+                  <span>📋 โปรแกรมทุกคู่ในสัปดาห์นี้</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                    filterMode === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}>
+                    {displayedMatches.length}
+                  </span>
+                </button>
+              </>
+            )}
           </div>
 
           <div className="flex items-center gap-2.5 text-xs font-bold text-slate-600 flex-wrap">
-            <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-900 select-none bg-white/80 px-2.5 py-1 rounded-xl border border-slate-200">
-              <input
-                type="checkbox"
-                checked={hideFinishedMatches}
-                onChange={(e) => setHideFinishedMatches(e.target.checked)}
-                className="w-3.5 h-3.5 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
-              />
-              <span className="text-[11px]">ซ่อนคู่ที่หมดวันแข่งแล้ว</span>
-            </label>
+            {!isUserView && (
+              <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-900 select-none bg-white/80 px-2.5 py-1 rounded-xl border border-slate-200">
+                <input
+                  type="checkbox"
+                  checked={hideFinishedMatches}
+                  onChange={(e) => setHideFinishedMatches(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded text-rose-600 focus:ring-rose-500 cursor-pointer"
+                />
+                <span className="text-[11px]">ซ่อนคู่ที่หมดวันแข่งแล้ว</span>
+              </label>
+            )}
 
             {currentUser?.role === 'admin' && (
               <button
@@ -734,57 +771,41 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                 }`}
                 title="สลับดูมุมมองเสมือน User ของแบรนด์นี้ เพื่อทดสอบการล็อค/แสดงผล"
               >
-                {adminViewAsUser ? `👁️ ดูมุมมอง User (${adminBrand})` : '👑 โหมด Admin (แสดงทุกเบอร์)'}
+                {adminViewAsUser ? `👁️ มุมมอง User (${adminBrand})` : '👑 โหมด Admin (แสดงทุกแมตช์)'}
               </button>
             )}
           </div>
         </div>
 
-        {/* Empty State: เมื่อไม่มีโปรแกรมการแข่งขันในสัปดาห์นี้ */}
-        {displayedMatches.length === 0 && (
-          <div className="p-12 text-center bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm space-y-3">
-            <Calendar className="w-10 h-10 text-slate-400 mx-auto" />
-            <h3 className="text-base font-bold text-slate-800">
-              ไม่มีโปรแกรมการแข่งขันในรอบสัปดาห์นี้สำหรับ {selectedLeague}
-            </h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              อาจเป็นสัปดาห์พักเบรกทีมชาติหรือยังไม่มีโปรแกรมในระบบ ท่านสามารถเลือกลีกอื่นด้านบนเพื่อดูเบอร์ติดต่อ
-            </p>
-          </div>
-        )}
-
-        {/* Empty State: เมื่อเลือกแสดงเฉพาะคู่ที่ขอออกบูธ/รับบัตร แต่แบรนด์นี้ยังไม่ได้ลงทะเบียนในสัปดาห์นี้ */}
-        {displayedMatches.length > 0 && filterMode === 'registered_only' && brandRegisteredMatches.length === 0 && (
-          <div className="p-8 sm:p-10 text-center bg-white/90 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm space-y-4 max-w-lg mx-auto my-6">
+        {/* Empty State: เมื่อไม่มีรายการแมตช์ที่ลงทะเบียนไว้ */}
+        {filteredMatchesList.length === 0 && (
+          <div className="p-8 sm:p-12 text-center bg-white/90 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm space-y-4 max-w-lg mx-auto my-6">
             <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200">
               <Ticket className="w-7 h-7" />
             </div>
             <div className="space-y-1.5">
               <h3 className="text-base font-black text-slate-800">
-                ยังไม่มีแมตช์ที่แบรนด์ "{activeBrand}" ขอออกบูธหรือรับบัตรใน {selectedLeague}
+                {isUserView 
+                  ? `ยังไม่มีแมตช์ที่แบรนด์ "${activeBrand}" ขอออกบูธหรือรับบัตรใน ${selectedLeague}`
+                  : `ไม่มีรายการการแข่งขันในเงื่อนไขที่เลือกสำหรับ ${selectedLeague}`}
               </h3>
               <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                ระบบจะขึ้นเบอร์ติดต่อเฉพาะแมตช์ที่ลูกค้าแต่ละแบรนด์ขอออกบูธรับบัตรไว้ ท่านสามารถไปลงทะเบียนเพื่อขอออกบูธหรือรับบัตรได้ทันที
+                {isUserView
+                  ? `หน้าเบอร์ติดต่อในมุมมองผู้ใช้งานจะแสดงเฉพาะแมตช์ที่ท่านได้ลงทะเบียนขอออกบูธหรือรับบัตรไว้ และจะขึ้นเบอร์ติดต่อหลังจากแอดมินกดยืนยันเบอร์แล้ว (แมตช์ที่แข่งขันเสร็จสิ้นแล้วจะถูกซ่อนอัตโนมัติ)`
+                  : `ท่านสามารถเลือกดูแบรนด์อื่นหรือปรับตัวกรองด้านบน`}
               </p>
             </div>
-            <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
-              {onNavigateToRegister && (
+            {onNavigateToRegister && isUserView && (
+              <div className="pt-2">
                 <button
                   type="button"
                   onClick={() => onNavigateToRegister(selectedLeague)}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md cursor-pointer transition-transform hover:scale-105"
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md cursor-pointer transition-transform hover:scale-105"
                 >
-                  👉 ไปที่หน้าลงทะเบียน ({selectedLeague})
+                  👉 ไปที่หน้าลงทะเบียนขอออกบูธ/รับบัตร ({selectedLeague})
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setFilterMode('all')}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
-              >
-                📋 ดูโปรแกรมทุกคู่ในสัปดาห์นี้ ({displayedMatches.length} คู่)
-              </button>
-            </div>
+              </div>
+            )}
           </div>
         )}
 

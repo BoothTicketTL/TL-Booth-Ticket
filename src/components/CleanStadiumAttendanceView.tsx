@@ -26,7 +26,7 @@ import { LeagueBadge } from './common/LeagueBadge';
 import { resolveOfficialClubName } from '../lib/clubNameResolver';
 import { getFixtures, subscribeToFixtures } from '../lib/fixturesService';
 import { getSimulatedDate, subscribeToSimulatedDate } from '../lib/firebase';
-import { CURRENT_SIMULATED_DATE } from '../data/fixtures';
+import { CURRENT_SIMULATED_DATE, MONTH_LIST } from '../data/fixtures';
 import { 
   subscribeToAttendance, 
   getAttendanceRecords, 
@@ -126,6 +126,10 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
   const [fixtures, setFixtures] = useState<FixtureItem[]>(() => getFixtures());
   const [simDate, setSimDate] = useState<string>(() => getSimulatedDate() || '2026-10-09');
   const [attendanceRecords, setAttendanceRecords] = useState<StadiumAttendanceRecord[]>(() => getAttendanceRecords());
+
+  // User requirement 3: Dropdown to view match results and attendance by month or all season
+  // "ในหน้ายอดผู้ชมเราอยากให้ขึ้นโชว์ผลการแข่งขันและยอดผู้ชมทุกแมตช์การแข่งขันในลีกนั้นๆ อาจจะขึ้นโชว์เป็นทั้งเดือน หรือมี Dropdown ให้ลูกค้ากดดูผลการแข่งขันและยอดผู้ชมเป็นรายเดือนได้"
+  const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
 
   // Excel Upload Modal State (Specific target league: L1, L2, L3)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -230,39 +234,61 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
     return getFridayToThursdayCycle(simDate || '2026-10-09');
   }, [simDate]);
 
-  // Header range text: GUARANTEED identical across all 3 leagues (League 1, 2, 3)
-  const weekRangeText = useMemo(() => {
-    return `แมตช์วันที่ ${cycle.formattedRange}`;
-  }, [cycle]);
+  // Header range text: dynamic based on selected month or cycle
+  const periodRangeText = useMemo(() => {
+    if (selectedMonth === 'cycle') {
+      return `รอบสัปดาห์วันที่ ${cycle.formattedRange}`;
+    }
+    if (selectedMonth === 'All') {
+      return 'ทุกแมตช์การแข่งขันตลอดทั้งฤดูกาล 2026/27';
+    }
+    const foundMonth = MONTH_LIST.find(m => m.key === selectedMonth);
+    return foundMonth ? `ประจำเดือน${foundMonth.nameThai}` : `ประจำเดือน ${selectedMonth}`;
+  }, [selectedMonth, cycle]);
 
-  // Filter matches for the selected league for the Friday-to-Thursday match cycle (inclusive)
+  // Filter matches for the selected league based on month dropdown or week cycle
+  // "ในหน้ายอดผู้ชมเราอยากให้ขึ้นโชว์ผลการแข่งขันและยอดผู้ชมทุกแมตช์การแข่งขันในลีกนั้นๆ อาจจะขึ้นโชว์เป็นทั้งเดือน หรือมี Dropdown ให้ลูกค้ากดดูผลการแข่งขันและยอดผู้ชมเป็นรายเดือนได้"
   const displayedMatches = useMemo(() => {
     const leagueMatches = fixtures.filter(f => f.league === selectedLeague);
     if (leagueMatches.length === 0) return [];
 
-    // Filter to matches within Friday-Thursday cycle (inclusive)
-    let weekMatches = leagueMatches.filter(f => {
-      const matchDateStr = f.matchDate;
-      return matchDateStr >= cycle.fridayStr && matchDateStr <= cycle.thursdayStr;
-    });
+    let filteredMatches: FixtureItem[] = [];
 
-    // If no matches fall strictly in this cycle, fallback to nearest matches
-    if (weekMatches.length === 0) {
-      const refTime = new Date(cycle.fridayStr).getTime();
-      const sortedByProximity = [...leagueMatches].sort((a, b) => {
-        const diffA = Math.abs(new Date(a.matchDate).getTime() - refTime);
-        const diffB = Math.abs(new Date(b.matchDate).getTime() - refTime);
-        return diffA - diffB;
+    if (selectedMonth === 'cycle') {
+      // Filter to matches within Friday-Thursday cycle (inclusive)
+      filteredMatches = leagueMatches.filter(f => {
+        const matchDateStr = f.matchDate;
+        return matchDateStr >= cycle.fridayStr && matchDateStr <= cycle.thursdayStr;
       });
 
-      if (sortedByProximity.length > 0) {
-        const targetWeek = sortedByProximity[0].matchWeek;
-        weekMatches = leagueMatches.filter(f => f.matchWeek === targetWeek);
+      // If no matches fall strictly in this cycle, fallback to nearest matches
+      if (filteredMatches.length === 0) {
+        const refTime = new Date(cycle.fridayStr).getTime();
+        const sortedByProximity = [...leagueMatches].sort((a, b) => {
+          const diffA = Math.abs(new Date(a.matchDate).getTime() - refTime);
+          const diffB = Math.abs(new Date(b.matchDate).getTime() - refTime);
+          return diffA - diffB;
+        });
+
+        if (sortedByProximity.length > 0) {
+          const targetWeek = sortedByProximity[0].matchWeek;
+          filteredMatches = leagueMatches.filter(f => f.matchWeek === targetWeek);
+        }
+      }
+    } else if (selectedMonth === 'All') {
+      // Show ALL matches in the league across the season
+      filteredMatches = [...leagueMatches];
+    } else {
+      // Show all matches in the selected month (e.g. '2026-10')
+      filteredMatches = leagueMatches.filter(f => f.matchDate && f.matchDate.startsWith(selectedMonth));
+      // Fallback if month has no match
+      if (filteredMatches.length === 0) {
+        filteredMatches = leagueMatches.filter(f => (f.month && f.month === selectedMonth) || (f as any).seasonMonth === selectedMonth);
       }
     }
 
     // Align League 3 dates so that matches fall on the exact same weekend as League 1 & 2
-    const alignedMatches = weekMatches.map(f => {
+    const alignedMatches = filteredMatches.map(f => {
       if (f.league === 'League 3' && f.matchDate === '2026-10-12') {
         return { ...f, matchDate: '2026-10-11' };
       }
@@ -275,7 +301,7 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
       if (dateCompare !== 0) return dateCompare;
       return (a.matchTime || '').localeCompare(b.matchTime || '');
     });
-  }, [fixtures, selectedLeague, cycle]);
+  }, [fixtures, selectedLeague, selectedMonth, cycle]);
 
   // Attendance & score of a match = the record imported from Excel for the SAME league and the SAME two clubs
   // (compared by official club name). If there is no record, nothing is shown: no estimated / simulated numbers.
@@ -323,6 +349,34 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
       foundRecord: found,
     };
   };
+
+  // Summary Metrics for the displayed period / month
+  const attendanceMetrics = useMemo(() => {
+    let totalAudience = 0;
+    let matchesWithAudience = 0;
+    let matchesWithScores = 0;
+
+    displayedMatches.forEach(m => {
+      const att = getAttendanceForMatch(m);
+      if (att.attendance !== null && att.attendance > 0) {
+        totalAudience += att.attendance;
+        matchesWithAudience++;
+      }
+      if ((att.homeScore !== undefined && att.awayScore !== undefined) || (att.score && att.score.includes('-'))) {
+        matchesWithScores++;
+      }
+    });
+
+    const avgAudience = matchesWithAudience > 0 ? Math.round(totalAudience / matchesWithAudience) : 0;
+
+    return {
+      totalMatches: displayedMatches.length,
+      matchesWithScores,
+      totalAudience,
+      avgAudience,
+      matchesWithAudience
+    };
+  }, [displayedMatches, attendanceByPair]);
 
   // Handle saving edited attendance and score (No capacity per user request)
   const handleSaveAttendance = async () => {
@@ -586,14 +640,118 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
             <LeagueBadge league={selectedLeague} size="xl" />
           </div>
 
-          {/* Title: ยอดผู้ชมการแข่งขัน แมตช์วันที่ 9-15 ต.ค.2569 (เป๊ะเท่ากันทั้ง 3 ลีก) */}
+          {/* Title: ยอดผู้ชมและผลการแข่งขัน */}
           <div className="space-y-1">
             <h2 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight">
-              ยอดผู้ชมการแข่งขัน {weekRangeText}
+              ผลการแข่งขันและยอดผู้ชม {periodRangeText} ({selectedLeague})
             </h2>
             <p className="text-xs sm:text-sm font-semibold text-slate-500">
-              ผลการแข่งขันและสถิติยอดผู้ชมในสนามจริง อัปเดตจากไฟล์ Excel ของระบบ
+              ผลการแข่งขันและสถิติยอดผู้ชมในสนามจริง อัปเดตจากระบบและไฟล์ Excel ประจำลีก
             </p>
+          </div>
+        </div>
+
+        {/* User Requirement 3: Month Dropdown & Period Quick Switcher */}
+        {/* "ในหน้ายอดผู้ชมเราอยากให้ขึ้นโชว์ผลการแข่งขันและยอดผู้ชมทุกแมตช์การแข่งขันในลีกนั้นๆ อาจจะขึ้นโชว์เป็นทั้งเดือน หรือมี Dropdown ให้ลูกค้ากดดูผลการแข่งขันและยอดผู้ชมเป็นรายเดือนได้" */}
+        <div className="bg-white/90 backdrop-blur-md rounded-2xl p-3.5 sm:p-4 border border-slate-200/90 shadow-sm space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-200">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+                  เลือกดูผลการแข่งขันและยอดผู้ชม:
+                </span>
+                <span className="text-sm font-black text-slate-900">
+                  {selectedMonth === 'All' 
+                    ? 'ทุกแมตช์ตลอดฤดูกาล' 
+                    : selectedMonth === 'cycle' 
+                    ? `รอบสัปดาห์นี้ (${cycle.formattedRange})` 
+                    : MONTH_LIST.find(m => m.key === selectedMonth)?.nameThai || selectedMonth}
+                </span>
+              </div>
+            </div>
+
+            {/* Dropdown Selector */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <label htmlFor="month-select" className="text-xs font-bold text-slate-600 shrink-0">
+                เลือกเดือน:
+              </label>
+              <select
+                id="month-select"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-300 text-xs sm:text-sm font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500 shadow-2xs cursor-pointer min-w-[200px]"
+              >
+                <option value="2026-10">ตุลาคม 2569 (Oct 2026) ⭐ เดือนปัจจุบัน</option>
+                <option value="All">ทุกเดือน (ทั้งฤดูกาล 2026/27)</option>
+                <option value="cycle">รอบสัปดาห์นี้ ({cycle.formattedRange})</option>
+                <option disabled>────────── รายเดือน ──────────</option>
+                {MONTH_LIST.map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.nameThai}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Quick Filter Pills */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100">
+            <span className="text-[11px] font-bold text-slate-400 mr-1">ทางลัด:</span>
+            {[
+              { id: '2026-10', label: 'ตุลาคม 2569 (เดือนนี้)' },
+              { id: 'All', label: 'ทั้งฤดูกาล (ทุกเดือน)' },
+              { id: 'cycle', label: `รอบสัปดาห์นี้ (${cycle.formattedRange})` },
+              { id: '2026-09', label: 'ก.ย. 69' },
+              { id: '2026-11', label: 'พ.ย. 69' },
+              { id: '2026-12', label: 'ธ.ค. 69' },
+            ].map(pill => {
+              const isActive = selectedMonth === pill.id;
+              return (
+                <button
+                  key={pill.id}
+                  type="button"
+                  onClick={() => setSelectedMonth(pill.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-rose-600 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {pill.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Monthly Summary Statistics Banner */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-center">
+              <span className="text-[10px] font-bold text-slate-500 block">โปรแกรมการแข่งขัน</span>
+              <span className="text-base sm:text-lg font-black text-slate-900">
+                {attendanceMetrics.totalMatches} <span className="text-xs font-bold text-slate-500">คู่</span>
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-center">
+              <span className="text-[10px] font-bold text-slate-500 block">มีผลการแข่งขันแล้ว</span>
+              <span className="text-base sm:text-lg font-black text-emerald-700">
+                {attendanceMetrics.matchesWithScores} <span className="text-xs font-bold text-slate-500">คู่</span>
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-center">
+              <span className="text-[10px] font-bold text-slate-500 block">ยอดผู้ชมรวมในสนาม</span>
+              <span className="text-base sm:text-lg font-black text-[#ff0033]">
+                {attendanceMetrics.totalAudience > 0 ? attendanceMetrics.totalAudience.toLocaleString() : '-'} <span className="text-xs font-bold text-slate-500">คน</span>
+              </span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-center">
+              <span className="text-[10px] font-bold text-slate-500 block">เฉลี่ยต่อนัด</span>
+              <span className="text-base sm:text-lg font-black text-blue-700">
+                {attendanceMetrics.avgAudience > 0 ? attendanceMetrics.avgAudience.toLocaleString() : '-'} <span className="text-xs font-bold text-slate-500">คน</span>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -642,10 +800,10 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
           <div className="p-12 text-center bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm space-y-3">
             <Calendar className="w-10 h-10 text-slate-400 mx-auto" />
             <h3 className="text-base font-bold text-slate-800">
-              ไม่มีโปรแกรมการแข่งขันในรอบสัปดาห์นี้สำหรับ {selectedLeague}
+              ไม่มีโปรแกรมการแข่งขันสำหรับ {selectedLeague} ในช่วงเวลาที่เลือก ({periodRangeText})
             </h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              อาจเป็นสัปดาห์พักเบรกทีมชาติหรือยังไม่มีโปรแกรมในระบบ ท่านสามารถเลือกลีกอื่นด้านบนเพื่อดูยอดผู้ชม
+              ท่านสามารถเปลี่ยนเดือนที่ Dropdown หรือกดเลือก "ทั้งฤดูกาล (ทุกเดือน)" หรือเลือกลีกอื่นด้านบนเพื่อดูผลการแข่งขันและยอดผู้ชม
             </p>
           </div>
         )}
@@ -762,8 +920,12 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
                     </div>
 
                     {/* Score Label Tag */}
-                    <span className="text-[10px] sm:text-[11px] font-black text-[#ff0033] mt-1 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
-                      {hasRealScore ? 'ผลการแข่งขัน' : 'ผลการแข่งขัน'}
+                    <span className={`text-[10px] sm:text-[11px] font-black mt-1 border px-2 py-0.5 rounded-full ${
+                      hasRealScore 
+                        ? 'text-[#ff0033] bg-red-50 border-red-200' 
+                        : 'text-slate-500 bg-slate-50 border-slate-200'
+                    }`}>
+                      {hasRealScore ? 'จบการแข่งขัน' : 'รอผลการแข่งขัน'}
                     </span>
                   </div>
 

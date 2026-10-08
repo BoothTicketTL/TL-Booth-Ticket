@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Shield } from 'lucide-react';
 import { LeagueType } from '../../types';
 import { getClubCrest, subscribeToClubCrests } from '../../lib/clubCrestService';
+import { STATIC_CREST_MAP } from '../../data/crestFiles';
 
 interface ClubCrestProps {
   clubName?: string;
@@ -116,20 +117,26 @@ export const ClubCrest: React.FC<ClubCrestProps> = ({
       setImgError(true);
       return;
     }
-    // If failed as .jpg in subfolder, try .png in that subfolder
+    const cleanName = clubName.trim();
+    // 1. Try static map if not tried yet
+    if (STATIC_CREST_MAP[cleanName] && crestUrl !== STATIC_CREST_MAP[cleanName]) {
+      setCrestUrl(STATIC_CREST_MAP[cleanName]);
+      return;
+    }
+    // 2. If failed as .jpg in subfolder, try .png in that subfolder
     if (crestUrl.endsWith('.jpg') && crestUrl.includes('%E0%B8%AA%E0%B9%82%E0%B8%A1%E0%B8%A8%E0%B8%A3%E0%B9%84%E0%B8%97%E0%B8%A2%E0%B8%A5%E0%B8%B5%E0%B8%81')) {
       setCrestUrl(crestUrl.replace(/\.jpg$/, '.png'));
       return;
     }
-    // If subfolder failed, try flat /crests/{clubName}.jpg
+    // 3. Try flat /crests/{cleanName}.png
     if (!triedFlatFallback) {
       setTriedFlatFallback(true);
-      setCrestUrl(`/crests/${encodeURIComponent(clubName.trim())}.jpg`);
+      setCrestUrl(`/crests/${encodeURIComponent(cleanName)}.png`);
       return;
     }
-    // If flat .jpg failed, try flat .png
-    if (crestUrl.endsWith('.jpg')) {
-      setCrestUrl(`/crests/${encodeURIComponent(clubName.trim())}.png`);
+    // 4. Try flat /crests/{cleanName}.jpg
+    if (crestUrl.endsWith('.png')) {
+      setCrestUrl(`/crests/${encodeURIComponent(cleanName)}.jpg`);
       return;
     }
     setImgError(true);

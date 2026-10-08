@@ -178,7 +178,34 @@ function getInitialLocalRecords(): RegistrationRecord[] {
   return INITIAL_REGISTRATIONS;
 }
 
-let memoryRecords: RegistrationRecord[] = getInitialLocalRecords();
+const DELETED_REGS_KEY = 'thaileague_deleted_registrations_v2';
+function getDeletedRegistrationIds(): Set<string> {
+  try {
+    const raw = safeGetItem(DELETED_REGS_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return new Set(arr);
+    }
+  } catch (e) {}
+  return new Set();
+}
+let deletedRegistrationIds = getDeletedRegistrationIds();
+
+function markRegistrationDeleted(id: string) {
+  deletedRegistrationIds.add(id);
+  try {
+    safeSetItem(DELETED_REGS_KEY, JSON.stringify(Array.from(deletedRegistrationIds)));
+  } catch (e) {}
+}
+
+function clearDeletedRegistrations() {
+  deletedRegistrationIds = new Set();
+  try {
+    safeSetItem(DELETED_REGS_KEY, JSON.stringify([]));
+  } catch (e) {}
+}
+
+let memoryRecords: RegistrationRecord[] = getInitialLocalRecords().filter(r => !deletedRegistrationIds.has(r.id));
 
 function notifyListeners() {
   listeners.forEach(cb => {
@@ -226,28 +253,14 @@ export function subscribeToRegistrations(callback: (records: RegistrationRecord[
 
         isFirstFirestoreSyncDone = true;
         const list: RegistrationRecord[] = [];
-        const existingDocIds = new Set<string>();
         snapshot.forEach((docSnap) => {
-          existingDocIds.add(docSnap.id);
+          // If this document was marked as deleted, delete it from Firestore and do not include it
+          if (deletedRegistrationIds.has(docSnap.id)) {
+            deleteDoc(docSnap.ref).catch(() => {});
+            return;
+          }
           list.push({ ...docSnap.data(), id: docSnap.id } as RegistrationRecord);
         });
-
-        // If local client has records created before Firestore was online (or while offline),
-        // sync them to Firestore so other devices (Admin PC) see them immediately!
-        if (memoryRecords.length > 0) {
-          for (const localRec of memoryRecords) {
-            if (localRec?.id && !existingDocIds.has(localRec.id)) {
-              existingDocIds.add(localRec.id);
-              list.push(localRec);
-              try {
-                await setDoc(doc(firestoreDb, 'thaileague_registrations', localRec.id), sanitizeForFirestore(localRec));
-                console.log('✅ Auto-synced local registration to Firestore:', localRec.id, localRec.matchTitle);
-              } catch (err) {
-                console.warn('Auto-sync local to Firestore warning:', err);
-              }
-            }
-          }
-        }
 
         // Sort descending by timestamp in memory
         list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -330,6 +343,7 @@ export async function updateRegistration(
 
 // Delete Registration
 export async function deleteRegistration(id: string): Promise<void> {
+  markRegistrationDeleted(id);
   memoryRecords = memoryRecords.filter(r => r.id !== id);
   safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
   notifyListeners();
@@ -349,9 +363,11 @@ export async function deleteRegistration(id: string): Promise<void> {
 // Delete All or Filtered Registrations (ลบคำขอทั้งหมด หรือเฉพาะที่เลือก)
 export async function deleteAllRegistrations(idsToDelete?: string[]): Promise<void> {
   if (idsToDelete && idsToDelete.length > 0) {
+    idsToDelete.forEach(id => markRegistrationDeleted(id));
     const set = new Set(idsToDelete);
     memoryRecords = memoryRecords.filter(r => !set.has(r.id));
   } else {
+    memoryRecords.forEach(r => markRegistrationDeleted(r.id));
     memoryRecords = [];
   }
   safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
@@ -377,6 +393,7 @@ export async function deleteAllRegistrations(idsToDelete?: string[]): Promise<vo
 
 // Reset data to defaults
 export function resetToMockData(): void {
+  clearDeletedRegistrations();
   memoryRecords = [...INITIAL_REGISTRATIONS];
   safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(memoryRecords));
   notifyListeners();
