@@ -1432,16 +1432,13 @@ export function importFixturesFromRawText(rawText: string, defaultLeague: League
  */
 export async function fetchSingleSheetText(
   sheetId: string,
-  target?: { gid?: string | null; sheetName?: string; tabIndex?: number }
+  target?: { gid?: string | null; sheetName?: string; tabIndex?: number; requireFixtureColumns?: boolean }
 ): Promise<string | null> {
   const isInvalidCsv = (txt: string) => (
     !txt || txt.length < 15 || /<!DOCTYPE html>|<html|accounts\.google\.com/i.test(txt) ||
     (txt.includes('google.visualization.Query.setResponse') && /"status"\s*:\s*"error"/i.test(txt))
   );
 
-  // A Google endpoint may return a valid CSV for the wrong/default tab when the
-  // sheet selector is ignored. Accept only a CSV that actually looks like a
-  // fixture table; otherwise continue through the fallback chain.
   const isFixtureCsv = (txt: string) => {
     if (isInvalidCsv(txt)) return false;
     const s = txt.toLowerCase();
@@ -1452,12 +1449,20 @@ export async function fetchSingleSheetText(
       /วันที่แข่งขัน|วัน เดือน ปี|วันที่|date/i.test(s);
   };
 
+  const isAcceptableCsv = (txt: string) => {
+    if (isInvalidCsv(txt)) return false;
+    if (target?.requireFixtureColumns) {
+      return isFixtureCsv(txt);
+    }
+    return true;
+  };
+
   const read = async (url: string): Promise<string | null> => {
     try {
       const res = await fetch(url, { headers: { Accept: 'text/plain,text/csv,*/*;q=0.8' }, cache: 'no-store' });
       if (!res.ok) return null;
       const text = await res.text();
-      return isFixtureCsv(text) ? text : null;
+      return isAcceptableCsv(text) ? text : null;
     } catch {
       return null;
     }
@@ -1472,7 +1477,7 @@ export async function fetchSingleSheetText(
     const res = await fetch(`/api/sheets/fetch-csv?${qParams.join('&')}`, { cache: 'no-store' });
     if (res.ok) {
       const text = await res.text();
-      if (isFixtureCsv(text)) return text;
+      if (isAcceptableCsv(text)) return text;
     }
   } catch {}
 

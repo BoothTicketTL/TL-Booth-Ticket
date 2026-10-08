@@ -21,6 +21,7 @@ import {
   Lock
 } from 'lucide-react';
 import { LeagueType, UserProfile, FixtureItem, RegistrationRecord, BrandType } from '../types';
+import { getCanonicalOfficialClub } from '../data/officialSeasonClubs';
 import { ClubCrest } from './common/ClubCrest';
 import { LeagueBadge } from './common/LeagueBadge';
 import { getFixtures, subscribeToFixtures } from '../lib/fixturesService';
@@ -199,11 +200,13 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     }
   }, [initialLeague]);
 
-  // Admin Brand Dropdown state
-  const [adminBrand, setAdminBrand] = useState<BrandType>(() => {
-    return currentUser?.assignedBrand && currentUser.assignedBrand !== 'All'
-      ? currentUser.assignedBrand
-      : (currentUser?.organization || 'BYD');
+  // Admin Brand Dropdown state: defaults to 'All' so admin sees requests from all brands
+  const [adminBrand, setAdminBrand] = useState<BrandType | 'All'>(() => {
+    return currentUser?.role === 'admin'
+      ? 'All'
+      : (currentUser?.assignedBrand && currentUser.assignedBrand !== 'All'
+        ? currentUser.assignedBrand
+        : (currentUser?.organization || 'BYD'));
   });
 
   // Active brand: Admin uses selected adminBrand, regular User uses assigned brand
@@ -227,38 +230,65 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     const s1 = normalizeBrand(brand1);
     const s2 = normalizeBrand(brand2);
     if (!s1 || !s2) return false;
+    if (s1 === 'all' || s2 === 'all') return true;
     return s1 === s2 || s1.includes(s2) || s2.includes(s1);
   };
 
-  // Helper to check if a brand has requested booth or tickets for a specific match
-  // "หน้าเบอร์ติดต่อสนามจะขึ้นเบอร์ติดต่อเฉพาะแมตช์ที่ลูกค้าแต่ละแบรนด์ขอออกบูธรับบัตรไว้"
-  const getBrandRegistrationForMatch = (match: FixtureItem, brandToCheck: string) => {
-    return allRecords.find(rec => {
-      if (!isBrandMatch(rec.brand, brandToCheck)) return false;
-      const isMatch =
-        rec.fixtureId === match.id ||
-        (rec.matchDate === match.matchDate && (
-          rec.matchTitle?.includes(match.homeTeam) ||
-          rec.matchTitle?.includes(match.awayTeam) ||
-          (rec as any).homeTeam === match.homeTeam
-        ));
-      if (!isMatch) return false;
+  // Robust Match <-> Registration matching
+  const isRecordMatchingMatch = (rec: RegistrationRecord, match: FixtureItem): boolean => {
+    if (rec.fixtureId && match.id && rec.fixtureId === match.id) return true;
 
-      const hasBooth = Boolean(
-        rec.boothRequired && 
-        rec.dealerName && 
-        rec.dealerName.trim() !== '' && 
-        rec.dealerName !== '-' && 
-        rec.dealerName !== 'ไม่ออกบูธ'
-      ) || Boolean(rec.boothQuantity && Number(rec.boothQuantity) > 0);
+    const recDate = (rec.matchDate || '').slice(0, 10);
+    const matchDate = (match.matchDate || '').slice(0, 10);
+    const dateMatches = !recDate || !matchDate || recDate === matchDate;
 
-      const hasTicket = Boolean(
-        rec.ticketRequired && 
-        Number(rec.ticketQuantity) > 0
-      ) || Boolean(Number(rec.ticketQuantity) > 0);
+    const hCan = (getCanonicalOfficialClub(match.homeTeam)?.name || match.homeTeam || '').trim().toLowerCase();
+    const aCan = (getCanonicalOfficialClub(match.awayTeam)?.name || match.awayTeam || '').trim().toLowerCase();
+    const title = (rec.matchTitle || '').toLowerCase();
+    const recHome = ((rec as any).homeTeam || '').toLowerCase();
+    const recAway = ((rec as any).awayTeam || '').toLowerCase();
 
-      return hasBooth || hasTicket;
+    const homeMatches = (hCan && title.includes(hCan)) ||
+                        (match.homeTeam && title.includes(match.homeTeam.toLowerCase())) ||
+                        (recHome && hCan && recHome.includes(hCan));
+
+    const awayMatches = !aCan || (aCan && title.includes(aCan)) ||
+                        (match.awayTeam && title.includes(match.awayTeam.toLowerCase())) ||
+                        (recAway && aCan && recAway.includes(aCan));
+
+    if (homeMatches && dateMatches) return true;
+    if (homeMatches && awayMatches) return true;
+    return false;
+  };
+
+  // Check if a record is an active request (approved or pending or has booth/tickets)
+  const isRecordActiveRequest = (rec: RegistrationRecord): boolean => {
+    if (rec.status === 'rejected') return false;
+    if (rec.status === 'approved' || rec.status === 'pending') return true;
+    if (rec.boothRequired || ((rec as any).boothQuantity && Number((rec as any).boothQuantity) > 0)) return true;
+    if (rec.ticketRequired || (rec.ticketQuantity && Number(rec.ticketQuantity) > 0)) return true;
+    return true;
+  };
+
+  // Helper to get all registration records for a match
+  const getMatchRegistrations = (match: FixtureItem, brandFilter?: string, userEmail?: string) => {
+    return allRecords.filter(rec => {
+      if (!isRecordActiveRequest(rec)) return false;
+      if (!isRecordMatchingMatch(rec, match)) return false;
+
+      if (brandFilter && brandFilter !== 'All') {
+        const bMatch = isBrandMatch(rec.brand, brandFilter);
+        const eMatch = userEmail && rec.applicantEmail && rec.applicantEmail.toLowerCase() === userEmail.toLowerCase();
+        if (!bMatch && !eMatch) return false;
+      }
+      return true;
     });
+  };
+
+  // Helper to check if a brand has requested booth or tickets for a specific match
+  const getBrandRegistrationForMatch = (match: FixtureItem, brandToCheck: string) => {
+    const list = getMatchRegistrations(match, brandToCheck);
+    return list.length > 0 ? list[0] : undefined;
   };
 
   // Detailed booth & ticket status for a brand on a match
@@ -266,21 +296,11 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     const reg = getBrandRegistrationForMatch(match, brandToCheck);
     if (!reg) return { hasRegistered: false, hasBooth: false, hasTicket: false, reg: null };
 
-    const hasBooth = Boolean(
-      reg.boothRequired && 
-      reg.dealerName && 
-      reg.dealerName.trim() !== '' && 
-      reg.dealerName !== '-' && 
-      reg.dealerName !== 'ไม่ออกบูธ'
-    ) || Boolean(reg.boothQuantity && Number(reg.boothQuantity) > 0);
-
-    const hasTicket = Boolean(
-      reg.ticketRequired && 
-      Number(reg.ticketQuantity) > 0
-    ) || Boolean(Number(reg.ticketQuantity) > 0);
+    const hasBooth = Boolean(reg.boothRequired || ((reg as any).boothQuantity && Number((reg as any).boothQuantity) > 0));
+    const hasTicket = Boolean(reg.ticketRequired || (reg.ticketQuantity && Number(reg.ticketQuantity) > 0));
 
     return {
-      hasRegistered: hasBooth || hasTicket,
+      hasRegistered: true,
       hasBooth,
       hasTicket,
       reg,
@@ -289,33 +309,10 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
 
   // Helper to get all brand names that registered for a match
   const getRegisteredBrandsForMatch = (match: FixtureItem): string[] => {
+    const regs = getMatchRegistrations(match);
     const brandsSet = new Set<string>();
-    allRecords.forEach(rec => {
-      const isMatch =
-        rec.fixtureId === match.id ||
-        (rec.matchDate === match.matchDate && (
-          rec.matchTitle?.includes(match.homeTeam) ||
-          rec.matchTitle?.includes(match.awayTeam) ||
-          (rec as any).homeTeam === match.homeTeam
-        ));
-      if (!isMatch) return false;
-
-      const hasBooth = Boolean(
-        rec.boothRequired && 
-        rec.dealerName && 
-        rec.dealerName.trim() !== '' && 
-        rec.dealerName !== '-' && 
-        rec.dealerName !== 'ไม่ออกบูธ'
-      ) || Boolean(rec.boothQuantity && Number(rec.boothQuantity) > 0);
-
-      const hasTicket = Boolean(
-        rec.ticketRequired && 
-        Number(rec.ticketQuantity) > 0
-      ) || Boolean(Number(rec.ticketQuantity) > 0);
-
-      if (hasBooth || hasTicket) {
-        brandsSet.add(rec.brand);
-      }
+    regs.forEach(r => {
+      if (r.brand) brandsSet.add(r.brand);
     });
     return Array.from(brandsSet);
   };
@@ -372,36 +369,63 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     });
   }, [fixtures, selectedLeague, cycle]);
 
-  // User Requirement 2:
+  // Comprehensive league fixtures including any synthesized from registration records
+  const allLeagueMatches = useMemo(() => {
+    const baseMatches = fixtures.filter(f => f.league === selectedLeague);
+    const list = [...baseMatches];
+
+    allRecords.forEach(rec => {
+      if (rec.league === selectedLeague && isRecordActiveRequest(rec)) {
+        const exists = list.some(m => isRecordMatchingMatch(rec, m));
+        if (!exists && rec.matchTitle) {
+          const parts = rec.matchTitle.split(/ vs | VS | - /i);
+          const homeTeam = parts[0]?.trim() || (rec as any).homeTeam || 'ทีมเหย้า';
+          const awayTeam = parts[1]?.trim() || (rec as any).awayTeam || 'ทีมเยือน';
+          list.push({
+            id: rec.fixtureId || `reg-synth-${rec.id}`,
+            league: rec.league,
+            matchWeek: 1,
+            homeTeam,
+            awayTeam,
+            stadium: rec.stadium || 'สนามเหย้า',
+            matchDate: rec.matchDate || '2026-10-10',
+            matchTime: '18:00',
+            month: rec.month || (rec.matchDate ? rec.matchDate.slice(0, 7) : '2026-10'),
+          });
+        }
+      }
+    });
+
+    return list.sort((a, b) => {
+      const dComp = (a.matchDate || '').localeCompare(b.matchDate || '');
+      if (dComp !== 0) return dComp;
+      return (a.matchTime || '').localeCompare(b.matchTime || '');
+    });
+  }, [fixtures, selectedLeague, allRecords]);
+
+  // User Requirement:
   // "ในหน้าเบอร์ติดต่อมุมมอง User ถ้า User ไม่ได้ลงทะเบียนขอออกบูธรับบัตรในแมตช์แข่งขันนั้นมา ไม่ต้องขึ้นโชว์ชื่อแมตช์แข่งขันนั้นเลยในหน้าเบอร์ติดต่อ
   // และให้ขึ้นเบอร์ติดต่อแมตช์ที่ลงทะเบียนมาทุกแมตช์หลังจากแอดมินกดยืนยันเบอร์แล้ว ไม่ต้องจำกัดวันที่แบบหน้าตารางแข่งขัน แต่พอหมดวันแข่งขันนั้นให้เบอร์ติดต่อแมตช์นั้นๆหายไปเองอัตโนมัติ"
-  
-  // 1. Matches where activeBrand has requested booth or tickets across all dates in this league
-  const brandRegisteredMatchesAllSeason = useMemo(() => {
-    const leagueMatches = fixtures.filter(f => f.league === selectedLeague);
-    return leagueMatches.filter(m => {
-      const status = getBrandBoothAndTicketStatus(m, activeBrand);
-      if (!status.hasRegistered) return false;
+  const userRegisteredMatchesAllSeason = useMemo(() => {
+    return allLeagueMatches.filter(m => {
+      const userRegs = getMatchRegistrations(m, activeBrand !== 'All' ? activeBrand : undefined, currentUser?.email);
+      if (userRegs.length === 0) return false;
 
       // Automatically hide once match date is over: "แต่พอหมดวันแข่งขันนั้นให้เบอร์ติดต่อแมตช์นั้นๆหายไปเองอัตโนมัติ"
       if (simDate && m.matchDate && simDate > m.matchDate) {
         return false;
       }
       return true;
-    }).sort((a, b) => {
-      const dateCompare = (a.matchDate || '').localeCompare(b.matchDate || '');
-      if (dateCompare !== 0) return dateCompare;
-      return (a.matchTime || '').localeCompare(b.matchTime || '');
     });
-  }, [fixtures, selectedLeague, activeBrand, allRecords, simDate]);
+  }, [allLeagueMatches, activeBrand, currentUser, allRecords, simDate]);
 
-  // Registered matches in this current week cycle (for Admin reference)
-  const brandRegisteredMatches = useMemo(() => {
-    return displayedMatches.filter(m => {
-      const status = getBrandBoothAndTicketStatus(m, activeBrand);
-      return status.hasRegistered;
+  // Admin Registered Matches (all season, across all brands or filtered brand)
+  const adminRegisteredMatchesAllSeason = useMemo(() => {
+    return allLeagueMatches.filter(m => {
+      const regs = getMatchRegistrations(m, adminBrand !== 'All' ? adminBrand : undefined);
+      return regs.length > 0;
     });
-  }, [displayedMatches, activeBrand, allRecords]);
+  }, [allLeagueMatches, adminBrand, allRecords]);
 
   // Is User View (true for normal user, or admin when testing User View)
   const isUserView = currentUser?.role !== 'admin' || adminViewAsUser;
@@ -410,19 +434,19 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
   const filteredMatchesList = useMemo(() => {
     if (isUserView) {
       // In User view: ONLY show matches that the user registered for, across all season dates, with expired matches automatically hidden!
-      return brandRegisteredMatchesAllSeason;
+      return userRegisteredMatchesAllSeason;
     }
 
     // In Admin view:
     let list = (filterMode === 'registered_only')
-      ? brandRegisteredMatchesAllSeason
+      ? adminRegisteredMatchesAllSeason
       : displayedMatches;
 
     if (hideFinishedMatches) {
       list = list.filter(m => !(simDate && m.matchDate && simDate > m.matchDate));
     }
     return list;
-  }, [isUserView, brandRegisteredMatchesAllSeason, filterMode, displayedMatches, hideFinishedMatches, simDate]);
+  }, [isUserView, userRegisteredMatchesAllSeason, adminRegisteredMatchesAllSeason, filterMode, displayedMatches, hideFinishedMatches, simDate]);
 
   // Admin: Sync stadium contacts from official Google Sheet
   const handleSyncContactsSheet = async () => {
@@ -652,10 +676,13 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
               <span className="text-xs font-bold text-slate-700 shrink-0">แบรนด์:</span>
               <select
                 value={adminBrand}
-                onChange={(e) => setAdminBrand(e.target.value as BrandType)}
+                onChange={(e) => setAdminBrand(e.target.value as BrandType | 'All')}
                 className="text-xs font-black text-emerald-800 bg-transparent border-0 focus:outline-none cursor-pointer"
                 title="เลือกแบรนด์ที่ต้องการดูหรือจัดการข้อมูล"
               >
+                <option value="All" className="text-slate-800 font-bold">
+                  ⭐ ทุกแบรนด์ (All Brands)
+                </option>
                 {SPONSOR_BRANDS.map((b) => (
                   <option key={b.id} value={b.id} className="text-slate-800 font-bold">
                     {b.name}
@@ -701,9 +728,9 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
           <div className="flex items-center gap-2 flex-wrap">
             {isUserView ? (
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-black shadow-sm ring-2 ring-emerald-400">
-                <span>⭐ แมตช์ที่ {activeBrand} ขอออกบูธ/รับบัตรไว้ ({selectedLeague})</span>
+                <span>⭐ แมตช์ที่ลงทะเบียนขอออกบูธ/รับบัตรไว้ ({selectedLeague})</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">
-                  {brandRegisteredMatchesAllSeason.length} แมตช์
+                  {userRegisteredMatchesAllSeason.length} แมตช์
                 </span>
               </div>
             ) : (
@@ -716,13 +743,13 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                       ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400'
                       : 'bg-white/90 text-slate-700 hover:bg-emerald-50 border border-slate-200'
                   }`}
-                  title="แสดงเฉพาะแมตช์ที่แบรนด์นี้ได้ลงทะเบียนขอออกบูธหรือขอรับสิทธิ์ตั๋วไว้"
+                  title="แสดงเฉพาะแมตช์ที่ได้รับการลงทะเบียนขอออกบูธหรือขอรับสิทธิ์ตั๋วไว้"
                 >
-                  <span>⭐ แมตช์ที่ {activeBrand} ขอออกบูธ/รับบัตรไว้</span>
+                  <span>⭐ แมตช์ที่มีคำขอ/อนุมัติแล้ว {adminBrand !== 'All' ? `(${adminBrand})` : '(ทุกแบรนด์)'}</span>
                   <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
                     filterMode === 'registered_only' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
                   }`}>
-                    {brandRegisteredMatchesAllSeason.length}
+                    {adminRegisteredMatchesAllSeason.length}
                   </span>
                 </button>
 
@@ -786,13 +813,13 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
             <div className="space-y-1.5">
               <h3 className="text-base font-black text-slate-800">
                 {isUserView 
-                  ? `ยังไม่มีแมตช์ที่แบรนด์ "${activeBrand}" ขอออกบูธหรือรับบัตรใน ${selectedLeague}`
-                  : `ไม่มีรายการการแข่งขันในเงื่อนไขที่เลือกสำหรับ ${selectedLeague}`}
+                  ? `ยังไม่มีแมตช์ที่ท่านได้ลงทะเบียนขอออกบูธหรือรับบัตรไว้ใน ${selectedLeague}`
+                  : `ไม่มีรายการคำขอในเงื่อนไขที่เลือกสำหรับ ${selectedLeague}`}
               </h3>
               <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
                 {isUserView
                   ? `หน้าเบอร์ติดต่อในมุมมองผู้ใช้งานจะแสดงเฉพาะแมตช์ที่ท่านได้ลงทะเบียนขอออกบูธหรือรับบัตรไว้ และจะขึ้นเบอร์ติดต่อหลังจากแอดมินกดยืนยันเบอร์แล้ว (แมตช์ที่แข่งขันเสร็จสิ้นแล้วจะถูกซ่อนอัตโนมัติ)`
-                  : `ท่านสามารถเลือกดูแบรนด์อื่นหรือปรับตัวกรองด้านบน`}
+                  : `ท่านสามารถเลือกดูแบรนด์อื่น หรือเปลี่ยนตัวกรองเป็น "โปรแกรมทุกคู่ในสัปดาห์นี้" ด้านบน`}
               </p>
             </div>
             {onNavigateToRegister && isUserView && (
@@ -822,13 +849,11 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
               fixtureId: match.id,
             });
 
-            // Find if current user/brand registered for this match (User requirement)
-            // "หน้าเบอร์ติดต่อสนามจะขึ้นเบอร์ติดต่อเฉพาะแมตช์ที่ลูกค้าแต่ละแบรนด์ขอออกบูธรับบัตรไว้"
-            const brandStatus = getBrandBoothAndTicketStatus(match, activeBrand);
-            const { hasRegistered, hasBooth, hasTicket } = brandStatus;
-            const hasBrandRegistered = hasRegistered;
-            const brandRegistration = brandStatus.reg;
-            const registeredBrands = getRegisteredBrandsForMatch(match);
+            // Find if current user/brand registered for this match
+            const matchRegs = getMatchRegistrations(match);
+            const userMatchRegs = getMatchRegistrations(match, activeBrand !== 'All' ? activeBrand : undefined, currentUser?.email);
+            const hasUserRegistered = userMatchRegs.length > 0;
+            const registeredBrands = Array.from(new Set(matchRegs.map(r => r.brand)));
 
             // Check if match day has passed: "เบอร์ติดต่อจะขึ้นโชว์จนกว่าจะหมดการแข่งขันวันนั้น"
             const isMatchDayPassed = Boolean(simDate && match.matchDate && simDate > match.matchDate);
@@ -909,10 +934,10 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                     </>
                   ) : (
                     <>
-                      {hasBrandRegistered ? (
+                      {hasUserRegistered ? (
                         <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-300 flex items-center gap-1 shadow-2xs">
                           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                          <span>{activeBrand} ขอออกบูธ/รับบัตรแล้ว</span>
+                          <span>ลงทะเบียนขอออกบูธ/รับบัตรแล้ว</span>
                         </span>
                       ) : (
                         <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-bold border border-slate-300 shadow-2xs">
@@ -1005,10 +1030,10 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                           {boothContactText}
                         </span>
                       )
-                    ) : !hasBrandRegistered ? (
+                    ) : !hasUserRegistered ? (
                       <span className="text-xs sm:text-sm font-semibold text-slate-400 flex items-center justify-center gap-1.5">
                         <Lock className="w-3.5 h-3.5 text-slate-400" />
-                        <span>เฉพาะคู่ที่ {activeBrand} ขอออกบูธ/รับบัตรไว้</span>
+                        <span>เฉพาะคู่ที่ขอออกบูธ/รับบัตรไว้</span>
                       </span>
                     ) : isMatchDayPassed ? (
                       <span className="text-xs sm:text-sm font-semibold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-lg flex items-center justify-center gap-1">
@@ -1053,10 +1078,10 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                           {ticketContactText}
                         </span>
                       )
-                    ) : !hasBrandRegistered ? (
+                    ) : !hasUserRegistered ? (
                       <span className="text-xs sm:text-sm font-semibold text-slate-400 flex items-center justify-center gap-1.5">
                         <Lock className="w-3.5 h-3.5 text-slate-400" />
-                        <span>เฉพาะคู่ที่ {activeBrand} ขอออกบูธ/รับบัตรไว้</span>
+                        <span>เฉพาะคู่ที่ขอออกบูธ/รับบัตรไว้</span>
                       </span>
                     ) : isMatchDayPassed ? (
                       <span className="text-xs sm:text-sm font-semibold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-lg flex items-center justify-center gap-1">
@@ -1090,10 +1115,10 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                       <span className="text-xs sm:text-sm font-extrabold text-slate-800 tracking-wide">
                         {ticketLocation}
                       </span>
-                    ) : !hasBrandRegistered ? (
+                    ) : !hasUserRegistered ? (
                       <span className="text-xs sm:text-sm font-semibold text-slate-400 flex items-center justify-center gap-1.5">
                         <Lock className="w-3.5 h-3.5 text-slate-400" />
-                        <span>แสดงจุดรับบัตรเฉพาะคู่ที่ {activeBrand} ขอรับบัตรไว้</span>
+                        <span>แสดงจุดรับบัตรเฉพาะคู่ที่ขอรับบัตรไว้</span>
                       </span>
                     ) : isMatchDayPassed ? (
                       <span className="text-xs sm:text-sm font-semibold text-slate-500">
@@ -1151,21 +1176,30 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                   </div>
                 )}
 
-                {/* Client Registered Details Summary (if registered) */}
-                {brandRegistration && (
-                  <div className="p-3 rounded-xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-900 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>
-                        สถานะลงทะเบียนของ <strong>{activeBrand}</strong>: ดีลเลอร์: <strong>{brandRegistration.dealerName}</strong> ({brandRegistration.dealerPhone})
-                        {brandRegistration.ticketQuantity ? ` • บัตรดูบอล: ${brandRegistration.ticketQuantity} ใบ` : ''}
-                      </span>
-                    </div>
-                    {brandRegistration.remark && (
-                      <span className="text-slate-500 italic">
-                        หมายเหตุ: {brandRegistration.remark}
-                      </span>
-                    )}
+                {/* Registered Details Summary for this match */}
+                {matchRegs.length > 0 && (
+                  <div className="space-y-1.5">
+                    {matchRegs.map(rec => (
+                      <div key={rec.id} className="p-2.5 rounded-xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-900 flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>
+                            คำขอของ <strong>{rec.brand}</strong>: ดีลเลอร์: <strong>{rec.dealerName && rec.dealerName !== '-' ? rec.dealerName : 'ไม่ระบุดีลเลอร์'}</strong> ({rec.dealerPhone || '-'})
+                            {rec.ticketQuantity ? ` • บัตรดูบอล: ${rec.ticketQuantity} ใบ` : ''}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            rec.status === 'approved' ? 'bg-emerald-200 text-emerald-900 border border-emerald-300' : 'bg-amber-100 text-amber-900 border border-amber-300'
+                          }`}>
+                            {rec.status === 'approved' ? 'อนุมัติแล้ว ✅' : 'รออนุมัติ ⏳'}
+                          </span>
+                        </div>
+                        {rec.remark && (
+                          <span className="text-slate-500 italic text-[11px]">
+                            หมายเหตุ: {rec.remark}
+                          </span>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

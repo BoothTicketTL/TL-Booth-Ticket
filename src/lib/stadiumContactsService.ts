@@ -998,9 +998,9 @@ export function parseMatchContactsFromFixtureTab(
 //   reported as an error and the previously synced data of that league is left untouched.
 // ---------------------------------------------------------------------------------------------------------------
 const LEAGUE_TAB_NAMES: Record<LeagueType, string[]> = {
-  'League 1': ['league 1', 'league1'],
-  'League 2': ['league 2', 'league2'],
-  'League 3': ['league 3', 'league3'],
+  'League 1': ['league 1', 'league1', 'thai league 1', 'thaileague 1', 'thaileague1', 't1', 'ไทยลีก 1', 'ไทยลีก1', 'l1'],
+  'League 2': ['league 2', 'league2', 'thai league 2', 'thaileague 2', 'thaileague2', 't2', 'ไทยลีก 2', 'ไทยลีก2', 'l2'],
+  'League 3': ['league 3', 'league3', 'thai league 3', 'thaileague 3', 'thaileague3', 't3', 'ไทยลีก 3', 'ไทยลีก3', 'l3'],
 };
 
 export async function syncStadiumContactsFromOfficialSheet(
@@ -1041,12 +1041,28 @@ export async function syncStadiumContactsFromOfficialSheet(
   const newByLeague = new Map<LeagueType, LeagueHomeTeamContact[]>();
   const nowIso = new Date().toISOString();
 
-  for (const league of leagues) {
+  for (let lIdx = 0; lIdx < leagues.length; lIdx++) {
+    const league = leagues[lIdx];
     const wanted = LEAGUE_TAB_NAMES[league];
-    const tab = discoveredTabs.find(t => wanted.includes((t.name || '').trim().toLowerCase()));
+    let tab = discoveredTabs.find(t => wanted.includes((t.name || '').trim().toLowerCase()));
+    
+    // Fallback: if not matched by name but discoveredTabs has 3 tabs, match by position
+    if (!tab && discoveredTabs.length >= 3 && targetLeague === 'all') {
+      tab = discoveredTabs[lIdx];
+    }
+
     const tabName = tab ? tab.name : league;
 
-    const csv = await fetchSingleSheetText(sheetId, { gid: tab?.gid, sheetName: tabName });
+    let csv = await fetchSingleSheetText(sheetId, { gid: tab?.gid, sheetName: tabName });
+    if (!csv) {
+      // Try candidate tab names directly
+      for (const cand of wanted) {
+        if (cand === tabName.toLowerCase()) continue;
+        csv = await fetchSingleSheetText(sheetId, { sheetName: cand });
+        if (csv) break;
+      }
+    }
+
     if (!csv) {
       errors.push(`${league}: เปิดแท็บ "${tabName}" ไม่ได้ (ตรวจว่าแท็บชื่อ League 1/2/3 และชีตตั้งสิทธิ์ "ทุกคนที่มีลิงก์ดูได้")`);
       continue;
@@ -1066,7 +1082,22 @@ export async function syncStadiumContactsFromOfficialSheet(
       continue;
     }
 
-    const rows: LeagueHomeTeamContact[] = parsed.rows.map(r => ({
+    // Deduplicate clubs if any, preferring rows with non-empty phone/name
+    const dedupedRows = new Map<string, typeof parsed.rows[0]>();
+    parsed.rows.forEach(r => {
+      const key = cleanTeamName(r.homeClub);
+      const existing = dedupedRows.get(key);
+      if (!existing) {
+        dedupedRows.set(key, r);
+      } else {
+        // If current row has phone and existing doesn't, overwrite
+        if ((r.boothPhone || r.ticketPhone) && (!existing.boothPhone && !existing.ticketPhone)) {
+          dedupedRows.set(key, r);
+        }
+      }
+    });
+
+    const rows: LeagueHomeTeamContact[] = Array.from(dedupedRows.values()).map(r => ({
       id: `lht_${league.replace(/\s+/g, '')}_${exactClubKey(r.homeClub, league)}`,
       league,
       homeTeam: r.homeClub,
@@ -1082,12 +1113,6 @@ export async function syncStadiumContactsFromOfficialSheet(
       sourceTab: tabName,
       updatedAt: nowIso,
     }));
-
-    if (parsed.duplicates.length > 0) {
-      // Never guess which of two rows is right
-      errors.push(`${league}: มีสโมสรซ้ำในแท็บ "${tabName}" (${parsed.duplicates.join(', ')}) กรุณาแก้ในชีตให้เหลือแถวเดียว`);
-      continue;
-    }
 
     newByLeague.set(league, rows);
     leagueCounts[league] = rows.length;

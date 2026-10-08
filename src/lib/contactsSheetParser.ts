@@ -45,10 +45,10 @@ const norm = (s: string) =>
     .toLowerCase();
 
 // Header names expected in the sheet (compared after removing spaces / case)
-const H_CLUB = ['สโมสรทีมเหย้า', 'ทีมเหย้า', 'สโมสรเหย้า'];
-const H_BOOTH = ['ชื่อ+เบอร์ติดต่อสำหรับออกบูธ', 'เบอร์ติดต่อสำหรับออกบูธ', 'ติดต่อสำหรับออกบูธ'];
-const H_TICKET = ['ชื่อ+เบอร์ติดต่อสำหรับรับบัตร', 'เบอร์ติดต่อสำหรับรับบัตร', 'ติดต่อสำหรับรับบัตร'];
-const H_REMARK = ['remark', 'หมายเหตุ'];
+const H_CLUB = ['สโมสรทีมเหย้า', 'ทีมเหย้า', 'สโมสรเหย้า', 'สโมสร', 'ชื่อสโมสร', 'ทีม', 'club', 'home club', 'home'];
+const H_BOOTH = ['ชื่อ+เบอร์ติดต่อสำหรับออกบูธ', 'เบอร์ติดต่อสำหรับออกบูธ', 'ติดต่อสำหรับออกบูธ', 'ออกบูธ', 'เบอร์ออกบูธ', 'บูธ', 'booth', 'booth contact'];
+const H_TICKET = ['ชื่อ+เบอร์ติดต่อสำหรับรับบัตร', 'เบอร์ติดต่อสำหรับรับบัตร', 'ติดต่อสำหรับรับบัตร', 'รับบัตร', 'เบอร์รับบัตร', 'บัตร', 'ตั๋ว', 'ticket', 'ticket contact'];
+const H_REMARK = ['remark', 'หมายเหตุ', 'จุดรับบัตร', 'สถานที่รับบัตร', 'สถานที่'];
 
 const findCol = (headers: string[], names: string[]) => {
   const wanted = names.map(norm);
@@ -98,9 +98,9 @@ export function parseContactsTab(csvText: string, league: LeagueType): ParsedCon
   const cRemark = findCol(headers, H_REMARK);
 
   const missing: string[] = [];
-  if (cBooth < 0) missing.push('ชื่อ+เบอร์ติดต่อสำหรับออกบูธ');
-  if (cTicket < 0) missing.push('ชื่อ+เบอร์ติดต่อสำหรับรับบัตร');
-  if (cRemark < 0) missing.push('Remark');
+  if (cBooth < 0 && cTicket < 0) {
+    missing.push('ชื่อ+เบอร์ติดต่อสำหรับออกบูธ หรือ ชื่อ+เบอร์ติดต่อสำหรับรับบัตร');
+  }
 
   const cell = (row: string[], idx: number) => (idx >= 0 ? (row[idx] || '').replace(/\u00a0/g, ' ').trim() : '');
 

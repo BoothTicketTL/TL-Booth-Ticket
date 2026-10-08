@@ -184,6 +184,23 @@ export function isMatchContactConfirmed(params: {
     }
   }
 
+  // 5. Scan entry records for matching home club and date (fuzzy date/fixture fallback)
+  if (cHome) {
+    for (const k of Object.keys(map)) {
+      const entry = map[k];
+      if (entry && entry.status === 'confirmed' && entry.cleanHomeClub === cHome) {
+        if (!matchDate || !entry.matchDate || entry.matchDate.slice(0, 10) === matchDate.slice(0, 10)) {
+          return {
+            isConfirmed: true,
+            confirmedAt: entry.confirmedAt,
+            confirmedBy: entry.confirmedBy,
+            confirmedWeekKey: entry.weekKey,
+          };
+        }
+      }
+    }
+  }
+
   return { isConfirmed: false };
 }
 
