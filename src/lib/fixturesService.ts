@@ -451,6 +451,10 @@ export async function saveFixtures(
     return (a.matchTime || '').localeCompare(b.matchTime || '');
   });
 
+  const previousFixturesSignature = JSON.stringify(cachedFixtures);
+  const nextFixturesSignature = JSON.stringify(combined);
+  const fixturesChanged = previousFixturesSignature !== nextFixturesSignature;
+
   cachedFixtures = combined;
   cachedMeta = {
     ...cachedMeta,
@@ -477,7 +481,7 @@ export async function saveFixtures(
 
   // Also sync to Firestore collection 'thaileague_fixtures' if available
   const { db: firestoreDb } = initFirebaseService();
-  if (firestoreDb) {
+  if (firestoreDb && fixturesChanged) {
     try {
       const docRef = doc(firestoreDb, 'thaileague_system_config', 'fixtures_config');
       await setDoc(docRef, {
