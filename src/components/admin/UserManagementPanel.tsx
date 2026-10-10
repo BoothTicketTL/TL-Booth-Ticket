@@ -43,7 +43,7 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
   const [inputEmail, setInputEmail] = useState('');
   const [inputName, setInputName] = useState('');
   const [inputRole, setInputRole] = useState<'admin' | 'user'>('user');
-  const [inputAssignedBrand, setInputAssignedBrand] = useState('BYD');
+  const [inputAssignedBrands, setInputAssignedBrands] = useState<string[]>(['BYD']);
   const [inputOrg, setInputOrg] = useState('');
   const [inputNote, setInputNote] = useState('');
 
@@ -52,6 +52,9 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
   const [editNameValue, setEditNameValue] = useState('');
   const [editOrgValue, setEditOrgValue] = useState('');
   const [editNoteValue, setEditNoteValue] = useState('');
+
+  // Editing Brands for a specific user State
+  const [managingBrandsUserId, setManagingBrandsUserId] = useState<string | null>(null);
 
   // Processing & Feedback
   const [isProcessing, setIsProcessing] = useState(false);
@@ -63,6 +66,40 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
     });
     return () => unsub();
   }, []);
+
+  const toggleInputBrand = (brandId: string) => {
+    setInputAssignedBrands(prev => {
+      if (prev.includes(brandId)) {
+        if (prev.length <= 1) return prev; // keep at least 1
+        return prev.filter(b => b !== brandId);
+      } else {
+        return [...prev, brandId];
+      }
+    });
+  };
+
+  const handleBrandChange = async (user: AuthorizedUser, brandId: string) => {
+    try {
+      setIsProcessing(true);
+      const currentBrands = Array.isArray(user.assignedBrands) && user.assignedBrands.length > 0
+        ? user.assignedBrands
+        : [brandId];
+      const newBrands = currentBrands.includes(brandId) ? currentBrands : [...currentBrands, brandId];
+      const res = await updateAuthorizedUser(user.id, {
+        assignedBrand: brandId,
+        assignedBrands: newBrands,
+      });
+      if (res.success) {
+        refreshCurrentUserRoleAndBrand();
+        setNotification({ 
+          type: 'success', 
+          message: `กำหนดให้แบรนด์ "${brandId}" เป็นแบรนด์หลักของ "${user.email}" เรียบร้อยแล้ว` 
+        });
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const handleStartEdit = (user: AuthorizedUser) => {
     setEditingUserId(user.id);
@@ -133,12 +170,14 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
 
     try {
       setIsProcessing(true);
+      const targetBrands = inputRole === 'admin' ? ['All'] : inputAssignedBrands;
       const res = await addAuthorizedUser({
         email: inputEmail.trim(),
         name: inputName.trim() || inputEmail.split('@')[0],
         role: inputRole,
-        assignedBrand: inputRole === 'admin' ? 'All' : inputAssignedBrand,
-        organization: inputOrg.trim() || (inputRole === 'admin' ? 'Plan B Media / Thai League' : `ตัวแทนแบรนด์ ${inputAssignedBrand}`),
+        assignedBrands: targetBrands,
+        assignedBrand: targetBrands[0] || 'BYD',
+        organization: inputOrg.trim() || (inputRole === 'admin' ? 'Plan B Media / Thai League' : `ตัวแทนแบรนด์ ${targetBrands.join(', ')}`),
         note: inputNote.trim() || undefined,
         addedBy: currentUser?.displayName || currentUser?.email || 'Admin',
       });
@@ -150,6 +189,7 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
         setInputName('');
         setInputOrg('');
         setInputNote('');
+        setInputAssignedBrands(['BYD']);
         setIsAddingUser(false);
       } else {
         setNotification({ type: 'error', message: res.message });
@@ -168,13 +208,14 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
     }
 
     const newRole: 'admin' | 'user' = user.role === 'admin' ? 'user' : 'admin';
-    const newBrand = newRole === 'admin' ? 'All' : (user.assignedBrand === 'All' ? 'BYD' : user.assignedBrand || 'BYD');
+    const newBrands = newRole === 'admin' ? ['All'] : (user.assignedBrands && user.assignedBrands.length > 0 && !user.assignedBrands.includes('All') ? user.assignedBrands : ['BYD']);
 
     try {
       setIsProcessing(true);
       const res = await updateAuthorizedUser(user.id, {
         role: newRole,
-        assignedBrand: newBrand,
+        assignedBrands: newBrands,
+        assignedBrand: newBrands[0],
       });
       if (res.success) {
         refreshCurrentUserRoleAndBrand();
@@ -185,17 +226,33 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
     }
   };
 
-  const handleBrandChange = async (user: AuthorizedUser, newBrand: string) => {
+  const handleToggleBrandForUser = async (user: AuthorizedUser, brandId: string) => {
+    const currentBrands = Array.isArray(user.assignedBrands) && user.assignedBrands.length > 0
+      ? user.assignedBrands
+      : [user.assignedBrand || 'BYD'];
+
+    let newBrands: string[];
+    if (currentBrands.includes(brandId)) {
+      if (currentBrands.length <= 1) {
+        setNotification({ type: 'error', message: 'ผู้ใช้งานต้องมีแบรนด์ที่ดูแลอย่างน้อย 1 แบรนด์' });
+        return;
+      }
+      newBrands = currentBrands.filter(b => b !== brandId);
+    } else {
+      newBrands = [...currentBrands, brandId];
+    }
+
     try {
       setIsProcessing(true);
       const res = await updateAuthorizedUser(user.id, {
-        assignedBrand: newBrand,
+        assignedBrands: newBrands,
+        assignedBrand: newBrands[0] || 'BYD',
       });
       if (res.success) {
         refreshCurrentUserRoleAndBrand();
         setNotification({ 
           type: 'success', 
-          message: `กำหนดสิทธิ์ E-mail "${user.email}" ให้เป็นลูกค้าแบรนด์ "${newBrand}" เรียบร้อยแล้ว` 
+          message: `กำหนดสิทธิ์ E-mail "${user.email}" ดูแลแบรนด์: [ ${newBrands.join(', ')} ] เรียบร้อยแล้ว` 
         });
       }
     } finally {
@@ -248,25 +305,30 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
       const pakawan = users.find(u => u.email.toLowerCase() === 'pakawan.pl@planbmedia.co.th');
       if (pakawan) {
         await updateAuthorizedUser(pakawan.id, { 
-          name: 'pakawan.pl (Molten Client)',
+          name: 'pakawan.pl (BYD & Molten Client)',
           role: 'user', 
-          assignedBrand: 'Molten' 
+          assignedBrand: 'BYD',
+          assignedBrands: ['BYD', 'Molten'],
+          organization: 'Plan B Media / Brand Client',
+          note: 'ลูกค้าแบรนด์ BYD และ Molten (ล็อคสิทธิ์เฉพาะข้อมูลและคำขอของ BYD และ Molten)',
         });
       } else {
         await addAuthorizedUser({
           email: 'pakawan.pl@planbmedia.co.th',
-          name: 'pakawan.pl (Molten Client)',
+          name: 'pakawan.pl (BYD & Molten Client)',
           role: 'user',
-          assignedBrand: 'Molten',
-          organization: 'Plan B Media / Molten Client',
+          assignedBrand: 'BYD',
+          assignedBrands: ['BYD', 'Molten'],
+          organization: 'Plan B Media / Brand Client',
           addedBy: 'Admin Reset',
+          note: 'ลูกค้าแบรนด์ BYD และ Molten (ล็อคสิทธิ์เฉพาะข้อมูลและคำขอของ BYD และ Molten)',
         });
       }
 
       refreshCurrentUserRoleAndBrand();
       setNotification({ 
         type: 'success', 
-        message: 'รีเซ็ตบัญชีตัวอย่าง: chitipat.ja (BYD) และ pakawan.pl (Molten) เรียบร้อยแล้ว' 
+        message: 'รีเซ็ตบัญชีตัวอย่างเรียบร้อย: pakawan.pl (ดูแลทั้งแบรนด์ BYD และ Molten) และ chitipat.ja (ดูแล BYD)' 
       });
     } catch (e: any) {
       setNotification({ type: 'error', message: e.message || 'เกิดข้อผิดพลาด' });
@@ -435,24 +497,68 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
             </div>
 
             {inputRole === 'user' && (
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  แบรนด์ที่ล็อคสิทธิ์ให้ดูแล (Assigned Brand) <span className="text-rose-500">*</span>
-                </label>
-                <select
-                  value={inputAssignedBrand}
-                  onChange={e => setInputAssignedBrand(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-emerald-300 text-xs font-bold text-emerald-900 bg-emerald-50/50 focus:ring-2 focus:ring-emerald-500"
-                >
-                  {brands.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.id} ({b.name})
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  ผู้ใช้นี้จะถูกล็อคให้ลงทะเบียนและดูข้อมูลได้เฉพาะแบรนด์นี้เท่านั้น
-                </span>
+              <div className="sm:col-span-2 lg:col-span-3 bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>แบรนด์ที่ล็อคสิทธิ์ให้ดูแล (สามารถเลือกได้หลายแบรนด์)</span>
+                    <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setInputAssignedBrands(brands.map(b => b.id))}
+                      className="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer"
+                    >
+                      เลือกทุกแบรนด์
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setInputAssignedBrands(['BYD'])}
+                      className="text-[11px] font-bold text-slate-500 hover:underline cursor-pointer"
+                    >
+                      รีเซ็ตเป็น BYD
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-600 mb-2.5">
+                  คลิกเพื่อเลือกแบรนด์ที่ต้องการมอบสิทธิ์ — สามารถเลือกได้มากกว่า 1 แบรนด์ เช่น ทั้ง BYD และ Molten
+                </p>
+
+                <div className="flex flex-wrap gap-2">
+                  {brands.map(b => {
+                    const isSelected = inputAssignedBrands.includes(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => toggleInputBrand(b.id)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                          isSelected
+                            ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-300'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        {isSelected ? <Check className="w-3.5 h-3.5 text-white" /> : <span className="w-3.5 h-3.5 rounded-full border border-slate-300" />}
+                        <span>{b.id}</span>
+                        <span className={`text-[10px] ${isSelected ? 'text-emerald-100' : 'text-slate-400'}`}>({b.name})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-3 pt-2 border-t border-emerald-200/60 flex items-center gap-2 text-xs">
+                  <span className="font-semibold text-slate-700">แบรนด์ที่เลือกไว้ ({inputAssignedBrands.length}):</span>
+                  <div className="flex flex-wrap gap-1">
+                    {inputAssignedBrands.map(bId => (
+                      <span key={bId} className="px-2 py-0.5 rounded-md bg-white border border-emerald-300 text-emerald-900 font-black text-[11px] shadow-2xs">
+                        {bId}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -627,9 +733,10 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
                     </div>
                   </div>
                 ) : (
-                  /* Standard User Row */
-                  <div className="p-4 flex flex-wrap items-center justify-between gap-4 hover:bg-slate-50/60 transition-colors">
-                    <div className="flex items-center gap-3.5">
+                  <>
+                    {/* Standard User Row */}
+                    <div className="p-4 flex flex-wrap items-center justify-between gap-4 hover:bg-slate-50/60 transition-colors">
+                      <div className="flex items-center gap-3.5">
                       <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-xs shrink-0 ${
                         user.role === 'admin' 
                           ? 'bg-blue-600 text-white shadow-xs' 
@@ -695,26 +802,66 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
                         )}
                       </button>
 
-                      {/* Assigned Brand Selector (Admin can change at any time) */}
+                      {/* Assigned Brands Multi-Selector (Admin can manage multiple brands) */}
                       {user.role === 'user' ? (
-                        <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
-                          <span className="text-[11px] font-semibold text-slate-500">แบรนด์ที่ดูแล:</span>
-                          <select
-                            value={user.assignedBrand || 'BYD'}
-                            onChange={(e) => handleBrandChange(user, e.target.value)}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* Badges of currently assigned brands */}
+                          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+                            <span className="text-[11px] font-semibold text-slate-500">แบรนด์ที่ดูแล:</span>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {(Array.isArray(user.assignedBrands) && user.assignedBrands.length > 0 
+                                ? user.assignedBrands 
+                                : [user.assignedBrand || 'BYD']
+                              ).map((bId) => (
+                                <span 
+                                  key={bId}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-900 text-[11px] font-black shadow-2xs"
+                                >
+                                  <span>{bId}</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Button to toggle Brand Management popover */}
+                          <button
+                            type="button"
+                            onClick={() => setManagingBrandsUserId(managingBrandsUserId === user.id ? null : user.id)}
                             disabled={isProcessing}
-                            className="bg-white border border-slate-300 rounded-lg px-2 py-0.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                              managingBrandsUserId === user.id
+                                ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                            }`}
+                            title="คลิกเพื่อเพิ่ม/ลดแบรนด์ที่ผู้ใช้งานนี้ได้รับสิทธิ์ (เลือกได้หลายแบรนด์)"
                           >
-                            {brands.map(b => (
-                              <option key={b.id} value={b.id}>
-                                {b.id} ({b.name})
-                              </option>
-                            ))}
-                          </select>
+                            <Tag className="w-3 h-3" />
+                            <span>{managingBrandsUserId === user.id ? 'ปิดการตั้งค่า' : '+ จัดการแบรนด์'}</span>
+                          </button>
+
+                          {/* Primary brand selector if user has > 1 brand */}
+                          {(user.assignedBrands && user.assignedBrands.length > 1) && (
+                            <div className="flex items-center gap-1 text-[11px] bg-white border border-slate-200 rounded-lg px-2 py-0.5">
+                              <span className="text-slate-400 font-medium">หลัก:</span>
+                              <select
+                                value={user.assignedBrand || user.assignedBrands[0]}
+                                onChange={(e) => handleBrandChange(user, e.target.value)}
+                                disabled={isProcessing}
+                                className="font-bold text-slate-800 bg-transparent border-0 focus:outline-none cursor-pointer"
+                                title="เลือกแบรนด์เริ่มต้นเมื่อเข้าสู่ระบบ"
+                              >
+                                {user.assignedBrands.map(bId => (
+                                  <option key={bId} value={bId}>
+                                    {bId}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-slate-400 italic px-2 py-1">
-                          (เห็นข้อมูลทุกแบรนด์)
+                          (เข้าถึงข้อมูลได้ทุกแบรนด์)
                         </span>
                       )}
 
@@ -732,8 +879,60 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
                       )}
                     </div>
                   </div>
-                )}
-              </div>
+
+                  {/* Inline Multi-Brand Management Drawer for this user */}
+                  {managingBrandsUserId === user.id && user.role === 'user' && (
+                    <div className="p-4 bg-emerald-50/70 border-t border-emerald-200 space-y-3 animate-in fade-in slide-in-from-top-1">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Tag className="w-4 h-4 text-emerald-700" />
+                          <span className="text-xs font-bold text-slate-900">
+                            กำหนดแบรนด์ที่ <span className="text-emerald-800 font-extrabold">{user.email}</span> สามารถเข้าถึงได้:
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setManagingBrandsUserId(null)}
+                          className="text-xs text-slate-500 hover:text-slate-800 font-bold px-2.5 py-1 rounded-lg hover:bg-emerald-100 cursor-pointer"
+                        >
+                          ✕ ปิดการตั้งค่า
+                        </button>
+                      </div>
+
+                      <p className="text-[11px] text-slate-600">
+                        💡 คลิกที่กล่องแบรนด์เพื่อเปิด/ปิดสิทธิ์ทันที เมื่อผู้ใช้เข้าสู่ระบบด้วยอีเมลนี้ ระบบจะมี Dropdown ให้สลับแบรนด์ได้เฉพาะแบรนด์ที่ Admin เลือกไว้
+                      </p>
+
+                      <div className="flex flex-wrap gap-2">
+                        {brands.map(b => {
+                          const isAssigned = (Array.isArray(user.assignedBrands) && user.assignedBrands.length > 0 
+                            ? user.assignedBrands 
+                            : [user.assignedBrand || 'BYD']
+                          ).includes(b.id);
+                          return (
+                            <button
+                              key={b.id}
+                              type="button"
+                              onClick={() => handleToggleBrandForUser(user, b.id)}
+                              disabled={isProcessing}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                                isAssigned
+                                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-300'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              {isAssigned ? <Check className="w-3.5 h-3.5 text-white" /> : <span className="w-3.5 h-3.5 rounded-full border border-slate-300" />}
+                              <span>{b.id}</span>
+                              <span className={`text-[10px] ${isAssigned ? 'text-emerald-100' : 'text-slate-400'}`}>({b.name})</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
             );
           })}
         </div>

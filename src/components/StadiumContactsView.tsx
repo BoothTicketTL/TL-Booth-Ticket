@@ -101,10 +101,19 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
   }, []);
 
   const isUserAdmin = currentUser?.role === 'admin';
+  // Allowed brands for the client (supports multiple brands e.g. BYD & Molten)
+  const clientAllowedBrands = useMemo<string[]>(() => {
+    if (isUserAdmin) return ['All', ...dynamicBrands.map(b => b.id)];
+    const brands = Array.isArray(currentUser?.assignedBrands) && currentUser.assignedBrands.length > 0
+      ? currentUser.assignedBrands
+      : [currentUser?.assignedBrand || 'BYD'];
+    return brands.filter(b => b !== 'All');
+  }, [isUserAdmin, currentUser, dynamicBrands]);
+
   // If user is brand client (role: user or assignedBrand is set), lock them to their assignedBrand!
   const clientAssignedBrand = currentUser?.assignedBrand && currentUser.assignedBrand !== 'All'
     ? currentUser.assignedBrand
-    : (currentUser?.role === 'user' ? (currentUser.organization || 'BYD') : null);
+    : (clientAllowedBrands[0] || 'BYD');
 
   // Admin client simulation state (allows admin to test client view)
   const [simulateClientBrand, setSimulateClientBrand] = useState<string | null>(null);
@@ -123,8 +132,8 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
       );
       if (matched) return matched.id as BrandType;
     }
-    return 'BYD';
-  }, [activeLockBrand, currentUser, dynamicBrands]);
+    return (clientAllowedBrands[0] || 'BYD') as BrandType;
+  }, [activeLockBrand, currentUser, dynamicBrands, clientAllowedBrands]);
 
   const [selectedBrand, setSelectedBrand] = useState<BrandType | 'ALL_STADIUMS'>(initialBrand);
 
@@ -136,13 +145,13 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
   }, [activeLockBrand]);
 
   // STRICT DATA ISOLATION:
-  // If activeLockBrand is active, any records from other brands are strictly filtered out so no customer can ever see another brand's booth or ticket data!
+  // If user is not admin, only allow access to records of their allowed brands
   const secureRecords = useMemo(() => {
-    if (activeLockBrand) {
-      return records.filter(r => r.brand === activeLockBrand);
+    if (!isUserAdmin && clientAllowedBrands.length > 0 && !clientAllowedBrands.includes('All')) {
+      return records.filter(r => clientAllowedBrands.includes(r.brand));
     }
     return records;
-  }, [records, activeLockBrand]);
+  }, [records, isUserAdmin, clientAllowedBrands]);
 
   const [selectedLeague, setSelectedLeague] = useState<LeagueType | 'All'>(selectedLeagueFilter);
   const [searchTerm, setSearchTerm] = useState('');
@@ -761,13 +770,13 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
           {dynamicBrands.map(brand => {
             const count = brandMatchCounts[brand.id] || 0;
             const isSelected = selectedBrand === brand.id;
-            const isLocked = Boolean(activeLockBrand && activeLockBrand !== brand.id);
+            const isLocked = !isUserAdmin && !clientAllowedBrands.includes(brand.id) && !clientAllowedBrands.includes('All');
 
             if (isLocked) {
               return (
                 <div
                   key={brand.id}
-                  title={`ถูกจำกัดสิทธิ์: คุณสามารถดูข้อมูลได้เฉพาะแบรนด์ ${activeLockBrand} เท่านั้น`}
+                  title={`ถูกจำกัดสิทธิ์: บัญชีของคุณได้รับสิทธิ์เฉพาะแบรนด์ [${clientAllowedBrands.join(', ')}] เท่านั้น`}
                   className="p-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 text-slate-400 flex flex-col justify-between cursor-not-allowed opacity-60 select-none"
                 >
                   <div className="flex items-center justify-between w-full mb-1.5">

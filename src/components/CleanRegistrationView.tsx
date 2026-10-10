@@ -46,7 +46,7 @@ import {
   getAutoSyncConfig,
   setAutoSyncConfig
 } from '../lib/fixturesService';
-import { getSimulatedDate, subscribeToSimulatedDate, setSimulatedDate } from '../lib/firebase';
+import { getSimulatedDate, subscribeToSimulatedDate, setSimulatedDate, switchUserActiveBrand } from '../lib/firebase';
 import { CURRENT_SIMULATED_DATE } from '../data/fixtures';
 import { createRegistration, updateRegistration } from '../lib/firebase';
 
@@ -194,22 +194,45 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
     }
   }, [initialLeague]);
 
+  // User assigned brands list (supports multiple brands per user e.g. pakawan.pl has BYD & Molten)
+  const userAssignedBrands = useMemo<BrandType[]>(() => {
+    if (currentUser?.role === 'admin') {
+      return SPONSOR_BRANDS.map(b => b.id as BrandType);
+    }
+    const brands = Array.isArray(currentUser?.assignedBrands) && currentUser.assignedBrands.length > 0
+      ? currentUser.assignedBrands
+      : [currentUser?.assignedBrand || 'BYD'];
+    return brands.filter(b => b !== 'All') as BrandType[];
+  }, [currentUser]);
+
   // Admin Brand Dropdown state (Item 7: "เพิ่ม Drop down ให้แอดมินเลือกแบรนด์ด้วย")
   const [adminBrand, setAdminBrand] = useState<BrandType>(() => {
     return currentUser?.assignedBrand && currentUser.assignedBrand !== 'All'
-      ? currentUser.assignedBrand
+      ? (currentUser.assignedBrand as BrandType)
       : 'BYD';
   });
 
-  // Active brand: Admin uses selected adminBrand, regular User uses assigned brand
-  const activeBrand = useMemo(() => {
+  // User selected brand for multi-brand users
+  const [userSelectedBrand, setUserSelectedBrand] = useState<BrandType>(() => {
+    return (userAssignedBrands[0] || 'BYD') as BrandType;
+  });
+
+  useEffect(() => {
+    if (currentUser?.assignedBrand && currentUser.assignedBrand !== 'All') {
+      setUserSelectedBrand(currentUser.assignedBrand as BrandType);
+    }
+  }, [currentUser?.assignedBrand]);
+
+  // Active brand: Admin uses selected adminBrand, regular User uses userSelectedBrand (or assigned brand)
+  const activeBrand = useMemo<BrandType>(() => {
     if (currentUser?.role === 'admin') {
       return adminBrand;
     }
-    return currentUser?.assignedBrand && currentUser.assignedBrand !== 'All'
-      ? currentUser.assignedBrand
-      : 'BYD';
-  }, [currentUser, adminBrand]);
+    if (userAssignedBrands.includes(userSelectedBrand)) {
+      return userSelectedBrand;
+    }
+    return (userAssignedBrands[0] || 'BYD') as BrandType;
+  }, [currentUser, adminBrand, userAssignedBrands, userSelectedBrand]);
 
   // Synchronized Friday-to-Thursday match cycle across all 3 leagues (e.g. 9-15 ต.ค. 2569)
   const cycle = useMemo(() => {
@@ -626,7 +649,7 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
             })}
           </div>
 
-          {/* Admin Brand Dropdown (Item 7: "เพิ่ม Drop down ให้แอดมินเลือกแบรนด์ด้วย") */}
+          {/* Brand Dropdown (Admin has full selector, User with multiple brands has switcher dropdown) */}
           {currentUser?.role === 'admin' ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/95 border border-slate-300 shadow-2xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
@@ -644,8 +667,33 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
                 ))}
               </select>
             </div>
+          ) : userAssignedBrands.length > 1 ? (
+            /* Multi-brand client dropdown (เช่น pakawan.pl สลับระหว่าง BYD และ Molten) */
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse shrink-0"></span>
+              <span className="text-xs font-bold text-emerald-900 shrink-0">สลับแบรนด์:</span>
+              <select
+                value={activeBrand}
+                onChange={(e) => {
+                  const selected = e.target.value as BrandType;
+                  setUserSelectedBrand(selected);
+                  switchUserActiveBrand(selected);
+                }}
+                className="text-xs font-black text-emerald-950 bg-white px-2 py-0.5 rounded-lg border border-emerald-300 focus:outline-none cursor-pointer shadow-2xs"
+                title="คุณได้รับสิทธิ์ดูแลหลายแบรนด์ สามารถสลับแบรนด์เพื่อดูข้อมูลและลงทะเบียนได้ที่นี่"
+              >
+                {userAssignedBrands.map((bId) => {
+                  const bObj = SPONSOR_BRANDS.find(b => b.id === bId);
+                  return (
+                    <option key={bId} value={bId} className="text-slate-800 font-bold">
+                      {bObj ? bObj.name : bId}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
           ) : (
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/80 border border-slate-200 text-xs font-bold text-slate-700 shadow-2xs">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/80 border border-slate-200 text-xs font-bold text-slate-700 shadow-2xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
               <span>แบรนด์: <strong className="text-emerald-700">{activeBrand}</strong></span>
             </div>

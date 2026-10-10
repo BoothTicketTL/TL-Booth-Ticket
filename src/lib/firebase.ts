@@ -825,6 +825,7 @@ export async function signInWithGoogle(customEmail?: string, customName?: string
         role: effectiveRole,
         organization: roleCheck.organization || (userEmail.includes('planb') ? 'Plan B Media Co., Ltd.' : 'Thai League Sponsor / Partner'),
         assignedBrand,
+        assignedBrands: roleCheck.assignedBrands,
       };
       currentUserProfile = profile;
       safeSetItem(LOCAL_USER_KEY, JSON.stringify(profile));
@@ -852,6 +853,7 @@ export async function signInWithGoogle(customEmail?: string, customName?: string
     role: effectiveRole,
     organization: roleCheck.organization || (effectiveRole === 'admin' ? 'Plan B Media / Thai League Partner' : 'ผู้สนับสนุนและแบรนด์ร่วมกิจกรรม'),
     assignedBrand,
+    assignedBrands: roleCheck.assignedBrands,
   };
 
   currentUserProfile = profile;
@@ -873,6 +875,7 @@ export function switchUserRole(targetRole?: 'admin' | 'user'): UserProfile | nul
       role: targetRole || 'user',
       organization: 'ผู้สนับสนุนและแบรนด์ร่วมกิจกรรม',
       assignedBrand: 'BYD',
+      assignedBrands: ['BYD'],
     };
     currentUserProfile = defaultProfile;
     safeSetItem(LOCAL_USER_KEY, JSON.stringify(defaultProfile));
@@ -885,9 +888,28 @@ export function switchUserRole(targetRole?: 'admin' | 'user'): UserProfile | nul
     ...currentUserProfile,
     role: nextRole,
     assignedBrand: nextRole === 'admin' ? 'All' : (currentUserProfile.assignedBrand && currentUserProfile.assignedBrand !== 'All' ? currentUserProfile.assignedBrand : 'BYD'),
+    assignedBrands: nextRole === 'admin' ? ['All'] : (currentUserProfile.assignedBrands || ['BYD']),
   };
   safeSetItem(LOCAL_USER_KEY, JSON.stringify(currentUserProfile));
   notifyAuthListeners();
+  return currentUserProfile;
+}
+
+/**
+ * Switch active brand for a user who has multiple assigned brands
+ */
+export function switchUserActiveBrand(brand: string): UserProfile | null {
+  if (!currentUserProfile) return null;
+  const allowed = currentUserProfile.assignedBrands || [currentUserProfile.assignedBrand || 'BYD'];
+  if (currentUserProfile.role === 'admin' || allowed.includes('All') || allowed.includes(brand)) {
+    currentUserProfile = {
+      ...currentUserProfile,
+      assignedBrand: brand,
+    };
+    safeSetItem(LOCAL_USER_KEY, JSON.stringify(currentUserProfile));
+    notifyAuthListeners();
+    return currentUserProfile;
+  }
   return currentUserProfile;
 }
 
@@ -902,6 +924,7 @@ export function refreshCurrentUserRoleAndBrand(): void {
       ...currentUserProfile,
       role: roleCheck.role,
       assignedBrand: roleCheck.assignedBrand,
+      assignedBrands: roleCheck.assignedBrands,
       displayName: roleCheck.displayName || currentUserProfile.displayName,
       organization: roleCheck.organization || currentUserProfile.organization,
     };

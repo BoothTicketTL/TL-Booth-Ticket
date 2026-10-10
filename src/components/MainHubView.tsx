@@ -96,11 +96,15 @@ export const MainHubView: React.FC<MainHubViewProps> = ({
           <span className="text-teal-100 font-semibold truncate max-w-[200px]" title={currentUser?.email}>
             {currentUser?.email || 'User'}
           </span>
-          {currentUser?.assignedBrand && (
+          {(currentUser?.assignedBrands && currentUser.assignedBrands.length > 0) ? (
+            <span className="px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-bold text-[10px] border border-teal-500/40">
+              {currentUser.assignedBrands.join(' • ')}
+            </span>
+          ) : currentUser?.assignedBrand ? (
             <span className="px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-bold text-[10px] border border-teal-500/40">
               {currentUser.assignedBrand}
             </span>
-          )}
+          ) : null}
         </div>
 
         {/* Action Controls */}

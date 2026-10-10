@@ -25,7 +25,7 @@ import { getCanonicalOfficialClub } from '../data/officialSeasonClubs';
 import { ClubCrest } from './common/ClubCrest';
 import { LeagueBadge } from './common/LeagueBadge';
 import { getFixtures, subscribeToFixtures } from '../lib/fixturesService';
-import { getSimulatedDate, setSimulatedDate, subscribeToSimulatedDate, subscribeToRegistrations } from '../lib/firebase';
+import { getSimulatedDate, setSimulatedDate, subscribeToSimulatedDate, subscribeToRegistrations, switchUserActiveBrand } from '../lib/firebase';
 import { CURRENT_SIMULATED_DATE, SPONSOR_BRANDS } from '../data/fixtures';
 import { 
   findContactForStadiumOrMatch,
@@ -200,6 +200,17 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     }
   }, [initialLeague]);
 
+  // User assigned brands list (supports multiple brands per user e.g. pakawan.pl has BYD & Molten)
+  const userAssignedBrands = useMemo<string[]>(() => {
+    if (currentUser?.role === 'admin') {
+      return ['All', ...SPONSOR_BRANDS.map(b => b.id)];
+    }
+    const brands = Array.isArray(currentUser?.assignedBrands) && currentUser.assignedBrands.length > 0
+      ? currentUser.assignedBrands
+      : [currentUser?.assignedBrand || 'BYD'];
+    return brands.filter(b => b !== 'All');
+  }, [currentUser]);
+
   // Admin Brand Dropdown state: defaults to 'All' so admin sees requests from all brands
   const [adminBrand, setAdminBrand] = useState<BrandType | 'All'>(() => {
     return currentUser?.role === 'admin'
@@ -209,15 +220,27 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
         : (currentUser?.organization || 'BYD'));
   });
 
-  // Active brand: Admin uses selected adminBrand, regular User uses assigned brand
-  const activeBrand = useMemo(() => {
+  // User selected brand for multi-brand users
+  const [userSelectedBrand, setUserSelectedBrand] = useState<string>(() => {
+    return userAssignedBrands[0] || 'BYD';
+  });
+
+  useEffect(() => {
+    if (currentUser?.assignedBrand && currentUser.assignedBrand !== 'All') {
+      setUserSelectedBrand(currentUser.assignedBrand);
+    }
+  }, [currentUser?.assignedBrand]);
+
+  // Active brand: Admin uses selected adminBrand, regular User uses userSelectedBrand (or assigned brand)
+  const activeBrand = useMemo<string>(() => {
     if (currentUser?.role === 'admin') {
       return adminBrand;
     }
-    return currentUser?.assignedBrand && currentUser.assignedBrand !== 'All'
-      ? currentUser.assignedBrand
-      : (currentUser?.organization || 'BYD');
-  }, [currentUser, adminBrand]);
+    if (userAssignedBrands.includes(userSelectedBrand)) {
+      return userSelectedBrand;
+    }
+    return userAssignedBrands[0] || 'BYD';
+  }, [currentUser, adminBrand, userAssignedBrands, userSelectedBrand]);
 
   // View Filter Controls (User requirement: "หน้าเบอร์ติดต่อสนามจะขึ้นเบอร์ติดต่อเฉพาะแมตช์ที่ลูกค้าแต่ละแบรนด์ขอออกบูธรับบัตรไว้")
   const [filterMode, setFilterMode] = useState<'registered_only' | 'all'>('registered_only');
@@ -669,7 +692,7 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
             })}
           </div>
 
-          {/* Admin Brand Dropdown */}
+          {/* Brand Dropdown (Admin has full selector, User with multiple brands has switcher dropdown) */}
           {currentUser?.role === 'admin' ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/95 border border-slate-300 shadow-2xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
@@ -690,8 +713,33 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                 ))}
               </select>
             </div>
+          ) : userAssignedBrands.length > 1 ? (
+            /* Multi-brand client dropdown (เช่น pakawan.pl สลับระหว่าง BYD และ Molten ในหน้าเบอร์ติดต่อสนาม) */
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse shrink-0"></span>
+              <span className="text-xs font-bold text-emerald-900 shrink-0">สลับแบรนด์:</span>
+              <select
+                value={activeBrand}
+                onChange={(e) => {
+                  const selected = e.target.value;
+                  setUserSelectedBrand(selected);
+                  switchUserActiveBrand(selected);
+                }}
+                className="text-xs font-black text-emerald-950 bg-white px-2 py-0.5 rounded-lg border border-emerald-300 focus:outline-none cursor-pointer shadow-2xs"
+                title="คุณได้รับสิทธิ์ดูแลหลายแบรนด์ สามารถสลับแบรนด์เพื่อดูเบอร์ติดต่อสนามของแต่ละแบรนด์ได้ที่นี่"
+              >
+                {userAssignedBrands.map((bId) => {
+                  const bObj = SPONSOR_BRANDS.find(b => b.id === bId);
+                  return (
+                    <option key={bId} value={bId} className="text-slate-800 font-bold">
+                      {bObj ? bObj.name : bId}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
           ) : (
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/80 border border-slate-200 text-xs font-bold text-slate-700 shadow-2xs">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/80 border border-slate-200 text-xs font-bold text-slate-700 shadow-2xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
               <span>แบรนด์: <strong className="text-emerald-700">{activeBrand}</strong></span>
             </div>

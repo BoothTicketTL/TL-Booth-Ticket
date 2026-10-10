@@ -77,7 +77,8 @@ import {
   advanceSimulatedDate, 
   resetSimulatedDate,
   getSimulatedDate,
-  subscribeToMatchContacts 
+  subscribeToMatchContacts,
+  switchUserActiveBrand
 } from '../lib/firebase';
 import { 
   findContactForStadiumOrMatch, 
@@ -334,10 +335,14 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     if (!emailToTest) return null;
     const directUser = authorizedUsers.find(u => u.email.toLowerCase() === emailToTest);
     if (directUser) {
+      const brands = Array.isArray(directUser.assignedBrands) && directUser.assignedBrands.length > 0
+        ? directUser.assignedBrands
+        : [directUser.assignedBrand || 'BYD'];
       return {
         isKnown: true,
         role: directUser.role,
-        assignedBrand: directUser.assignedBrand,
+        assignedBrand: directUser.assignedBrand || brands[0],
+        assignedBrands: brands,
         displayName: directUser.name,
         organization: directUser.organization
       };
@@ -345,6 +350,18 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     const check = checkUserRoleByEmail(emailToTest);
     return check.isKnown ? check : null;
   }, [applicantEmail, currentUser, authorizedUsers]);
+
+  // Allowed brands for the user (supports multiple brands e.g. BYD & Molten)
+  const userAllowedBrands = useMemo<string[]>(() => {
+    if (isAdmin) return dynamicBrands.map(b => b.id);
+    if (detectedAuthInfo?.assignedBrands && detectedAuthInfo.assignedBrands.length > 0) {
+      return detectedAuthInfo.assignedBrands.filter(b => b !== 'All');
+    }
+    if (currentUser?.assignedBrands && currentUser.assignedBrands.length > 0) {
+      return currentUser.assignedBrands.filter(b => b !== 'All');
+    }
+    return [currentUser?.assignedBrand || 'BYD'];
+  }, [isAdmin, detectedAuthInfo, currentUser, dynamicBrands]);
 
   // Derived assigned brand (from email configuration or currentUser)
   const assignedBrand = useMemo(() => {
@@ -1287,6 +1304,39 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
                 <span className="text-[11px] text-slate-400 italic">
                   (ลูกค้าจะไม่เห็นเมนูสลับแบรนด์นี้ ลูกค้าจะเห็นเฉพาะแบรนด์ของตนเองตาม E-mail เท่านั้น)
                 </span>
+              </div>
+            </div>
+          )}
+
+          {/* MULTI-BRAND CLIENT SWITCHER (FOR CLIENTS WITH MULTIPLE BRANDS e.g. pakawan.pl) */}
+          {!isAdmin && userAllowedBrands.length > 1 && (
+            <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-950 border border-emerald-300 space-y-2 shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse" />
+                  <span>สลับแบรนด์ที่ดูแล (Admin ล็อคสิทธิ์ให้คุณเข้าถึง {userAllowedBrands.length} แบรนด์)</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <label className="text-xs text-slate-700 font-bold">
+                  เลือกแบรนด์ที่ต้องการลงทะเบียน:
+                </label>
+                <select
+                  value={selectedBrand}
+                  onChange={(e) => {
+                    const newBrand = e.target.value as BrandType;
+                    setSelectedBrand(newBrand);
+                    switchUserActiveBrand(newBrand);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl border border-emerald-400 bg-white text-xs font-black text-emerald-950 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
+                >
+                  {userAllowedBrands.map(bId => {
+                    const bObj = dynamicBrands.find(b => b.id === bId);
+                    return (
+                      <option key={bId} value={bId}>{bObj ? bObj.name : bId}</option>
+                    );
+                  })}
+                </select>
               </div>
             </div>
           )}

@@ -70,6 +70,7 @@ export interface UserProfile {
   role: 'admin' | 'user';
   organization?: string;
   assignedBrand?: string; // e.g. 'BYD', 'Chang', or 'All'
+  assignedBrands?: string[]; // Multiple assigned brands e.g. ['BYD', 'Molten']
 }
 
 export interface StadiumContact {
