@@ -18,7 +18,8 @@ import {
   Upload,
   FileSpreadsheet,
   Download,
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import { LeagueType, UserProfile, FixtureItem, StadiumAttendanceRecord, AttendanceImportSummary } from '../types';
 import { ClubCrest } from './common/ClubCrest';
@@ -34,6 +35,7 @@ import {
   saveAttendanceRecordsForLeague,
   parseAttendanceExcel,
   generateAttendanceExcelTemplate,
+  syncAttendanceFromCloud,
   STADIUM_CAPACITY_LOOKUP 
 } from '../lib/attendanceService';
 
@@ -204,6 +206,21 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
     };
   }, [currentUser, selectedLeague]);
 
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const handleManualCloudSync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await syncAttendanceFromCloud();
+      setToastMessage(`🔄 ซิงค์ข้อมูลผลบอลและยอดผู้ชมล่าสุดสำเร็จ (${res.count} แมตช์)`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } catch {
+      setToastMessage('⚠️ ไม่สามารถเชื่อมต่อระบบซิงค์ได้ในขณะนี้');
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
   // Subscribe to real-time fixtures, simDate, and attendance
   useEffect(() => {
     const unsubFixtures = subscribeToFixtures((data) => {
@@ -215,6 +232,9 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
     const unsubAttendance = subscribeToAttendance((data) => {
       setAttendanceRecords(data);
     });
+    // Immediately pull latest from cloud for any newly joined client
+    syncAttendanceFromCloud().catch(() => {});
+
     return () => {
       unsubFixtures();
       unsubSimDate();
@@ -246,17 +266,71 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
     return foundMonth ? `ประจำเดือน${foundMonth.nameThai}` : `ประจำเดือน ${selectedMonth}`;
   }, [selectedMonth, cycle]);
 
+  const normCleanTeam = (s: string) =>
+    (s || '')
+      .toLowerCase()
+      .replace(/\[.*?\]|\(.*?\)/g, '')
+      .replace(/สโมสรฟุตบอล|สโมสร|เอฟซี|ยูไนเต็ด|fc|utd|city|ซิตี้/g, '')
+      .replace(/[^a-z0-9\u0E00-\u0E7F]/g, '');
+
+  // Attendance & score of a match = the record imported from Excel for the SAME league and the SAME two clubs
+  // (compared by official club name). If there is no record, nothing is shown: no estimated / simulated numbers.
+  const officialPairKey = (lg: LeagueType, home: string, away: string) =>
+    `${lg}|${(resolveOfficialClubName(home, lg) || home).replace(/\s+/g, '').toLowerCase()}|${(resolveOfficialClubName(away, lg) || away).replace(/\s+/g, '').toLowerCase()}`;
+
+  const attendanceByPair = useMemo(() => {
+    const map = new Map<string, StadiumAttendanceRecord>();
+    attendanceRecords.forEach(r => {
+      // 1. Official Pair Key
+      map.set(officialPairKey(r.league, r.homeTeam, r.awayTeam), r);
+      // 2. Normalized Team Key
+      map.set(`${r.league}|${normCleanTeam(r.homeTeam)}|${normCleanTeam(r.awayTeam)}`, r);
+      // 3. Date-specific Normalized Key
+      if (r.matchDate) {
+        map.set(`${r.league}|${normCleanTeam(r.homeTeam)}|${normCleanTeam(r.awayTeam)}|${r.matchDate}`, r);
+      }
+    });
+    return map;
+  }, [attendanceRecords]);
+
   // Filter matches for the selected league based on month dropdown or week cycle
   // "ในหน้ายอดผู้ชมเราอยากให้ขึ้นโชว์ผลการแข่งขันและยอดผู้ชมทุกแมตช์การแข่งขันในลีกนั้นๆ อาจจะขึ้นโชว์เป็นทั้งเดือน หรือมี Dropdown ให้ลูกค้ากดดูผลการแข่งขันและยอดผู้ชมเป็นรายเดือนได้"
   const displayedMatches = useMemo(() => {
     const leagueMatches = fixtures.filter(f => f.league === selectedLeague);
-    if (leagueMatches.length === 0) return [];
+
+    // Merge any matches in attendanceRecords for this league that aren't already represented in fixtures
+    const existingPairKeys = new Set(
+      leagueMatches.map(f => `${normCleanTeam(f.homeTeam)}|${normCleanTeam(f.awayTeam)}`)
+    );
+    const extraMatches: FixtureItem[] = [];
+    attendanceRecords
+      .filter(r => r.league === selectedLeague)
+      .forEach(r => {
+        const pKey = `${normCleanTeam(r.homeTeam)}|${normCleanTeam(r.awayTeam)}`;
+        if (!existingPairKeys.has(pKey)) {
+          existingPairKeys.add(pKey);
+          extraMatches.push({
+            id: r.id || `att-extra-${r.homeTeam}-${r.awayTeam}`,
+            league: r.league,
+            matchWeek: r.matchWeek || 1,
+            matchDate: r.matchDate || '2026-10-10',
+            matchTime: r.matchTime || '18:00',
+            homeTeam: r.homeTeam,
+            awayTeam: r.awayTeam,
+            stadium: r.stadium || `สนามเหย้า ${r.homeTeam}`,
+            month: (r.matchDate ? r.matchDate.slice(0, 7) : '2026-10'),
+          });
+        }
+      });
+
+    const allCandidateMatches = [...leagueMatches, ...extraMatches];
+    if (allCandidateMatches.length === 0) return [];
 
     let filteredMatches: FixtureItem[] = [];
 
     if (selectedMonth === 'cycle') {
       // Filter to matches within Friday-Thursday cycle (inclusive)
-      filteredMatches = leagueMatches.filter(f => {
+      filteredMatches = allCandidateMatches.filter(f => {
         const matchDateStr = f.matchDate;
         return matchDateStr >= cycle.fridayStr && matchDateStr <= cycle.thursdayStr;
       });
@@ -264,7 +338,7 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
       // If no matches fall strictly in this cycle, fallback to nearest matches
       if (filteredMatches.length === 0) {
         const refTime = new Date(cycle.fridayStr).getTime();
-        const sortedByProximity = [...leagueMatches].sort((a, b) => {
+        const sortedByProximity = [...allCandidateMatches].sort((a, b) => {
           const diffA = Math.abs(new Date(a.matchDate).getTime() - refTime);
           const diffB = Math.abs(new Date(b.matchDate).getTime() - refTime);
           return diffA - diffB;
@@ -272,18 +346,24 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
 
         if (sortedByProximity.length > 0) {
           const targetWeek = sortedByProximity[0].matchWeek;
-          filteredMatches = leagueMatches.filter(f => f.matchWeek === targetWeek);
+          filteredMatches = allCandidateMatches.filter(f => f.matchWeek === targetWeek);
         }
       }
     } else if (selectedMonth === 'All') {
       // Show ALL matches in the league across the season
-      filteredMatches = [...leagueMatches];
+      filteredMatches = [...allCandidateMatches];
     } else {
       // Show all matches in the selected month (e.g. '2026-10')
-      filteredMatches = leagueMatches.filter(f => f.matchDate && f.matchDate.startsWith(selectedMonth));
+      filteredMatches = allCandidateMatches.filter(f => {
+        if (f.matchDate && f.matchDate.startsWith(selectedMonth)) return true;
+        const normKey = `${f.league}|${normCleanTeam(f.homeTeam)}|${normCleanTeam(f.awayTeam)}`;
+        const rec = attendanceByPair.get(normKey);
+        if (rec?.matchDate && rec.matchDate.startsWith(selectedMonth)) return true;
+        return (f.month && f.month === selectedMonth) || (f as any).seasonMonth === selectedMonth;
+      });
       // Fallback if month has no match
       if (filteredMatches.length === 0) {
-        filteredMatches = leagueMatches.filter(f => (f.month && f.month === selectedMonth) || (f as any).seasonMonth === selectedMonth);
+        filteredMatches = allCandidateMatches.filter(f => (f.month && f.month === selectedMonth) || (f as any).seasonMonth === selectedMonth);
       }
     }
 
@@ -301,21 +381,14 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
       if (dateCompare !== 0) return dateCompare;
       return (a.matchTime || '').localeCompare(b.matchTime || '');
     });
-  }, [fixtures, selectedLeague, selectedMonth, cycle]);
-
-  // Attendance & score of a match = the record imported from Excel for the SAME league and the SAME two clubs
-  // (compared by official club name). If there is no record, nothing is shown: no estimated / simulated numbers.
-  const officialPairKey = (lg: LeagueType, home: string, away: string) =>
-    `${lg}|${(resolveOfficialClubName(home, lg) || home).replace(/\s+/g, '').toLowerCase()}|${(resolveOfficialClubName(away, lg) || away).replace(/\s+/g, '').toLowerCase()}`;
-
-  const attendanceByPair = useMemo(() => {
-    const map = new Map<string, StadiumAttendanceRecord>();
-    attendanceRecords.forEach(r => map.set(officialPairKey(r.league, r.homeTeam, r.awayTeam), r));
-    return map;
-  }, [attendanceRecords]);
+  }, [fixtures, selectedLeague, selectedMonth, cycle, attendanceRecords, attendanceByPair]);
 
   const getAttendanceForMatch = (match: FixtureItem) => {
-    const found = attendanceByPair.get(officialPairKey(match.league, match.homeTeam, match.awayTeam));
+    const keyWithDate = `${match.league}|${normCleanTeam(match.homeTeam)}|${normCleanTeam(match.awayTeam)}|${match.matchDate}`;
+    const keyOfficial = officialPairKey(match.league, match.homeTeam, match.awayTeam);
+    const keyNorm = `${match.league}|${normCleanTeam(match.homeTeam)}|${normCleanTeam(match.awayTeam)}`;
+
+    const found = attendanceByPair.get(keyWithDate) || attendanceByPair.get(keyOfficial) || attendanceByPair.get(keyNorm);
 
     let score = found?.score || '';
     let homeScore: number | undefined = found?.homeScore;
@@ -449,8 +522,18 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
     if (!importSummary || importSummary.validRows === 0) return;
     await saveAttendanceRecordsForLeague(importSummary.parsedRecords, targetUploadLeague, 'merge', currentUser?.email || 'User');
     setSelectedLeague(targetUploadLeague);
-    setToastMessage(`✅ นำเข้าข้อมูลสำเร็จ: ผลคะแนนและยอดผู้ชม ${targetUploadLeague} จำนวน ${importSummary.validRows} แมตช์`);
-    setTimeout(() => setToastMessage(null), 4500);
+
+    // Auto-focus the month view to the imported records' month so admin and user see them right away
+    const importedDates = importSummary.parsedRecords.map(r => r.matchDate).filter(Boolean);
+    if (importedDates.length > 0) {
+      const firstMonth = importedDates[0].slice(0, 7);
+      if (firstMonth && firstMonth.length === 7) {
+        setSelectedMonth(firstMonth);
+      }
+    }
+
+    setToastMessage(`✅ นำเข้าข้อมูลสำเร็จ: ผลคะแนนและยอดผู้ชม ${targetUploadLeague} จำนวน ${importSummary.validRows} แมตช์ถูกบันทึกขึ้นระบบคลาวด์แล้ว`);
+    setTimeout(() => setToastMessage(null), 5000);
     setIsUploadModalOpen(false);
     setImportSummary(null);
   };
@@ -593,6 +676,18 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
               <span>{currentUser?.role === 'admin' ? '👑 Admin (สลับเป็น User ⇄)' : '👤 User (สลับเป็น Admin ⇄)'}</span>
             </button>
           )}
+
+          {/* Cloud Sync Refresh Button */}
+          <button
+            type="button"
+            onClick={handleManualCloudSync}
+            disabled={isSyncingCloud}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/90 hover:bg-white text-slate-700 text-xs font-bold border border-slate-300 shadow-2xs hover:shadow-xs transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+            title="กดเพื่อดึงข้อมูลผลการแข่งขันและยอดผู้ชมล่าสุดจากระบบคลาวด์ทันที"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-blue-600 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{isSyncingCloud ? 'กำลังซิงค์...' : 'ซิงค์คลาวด์'}</span>
+          </button>
 
           {/* League Selector Pills */}
           <div className="flex items-center bg-white/80 backdrop-blur-md p-1 rounded-2xl border border-slate-300 shadow-2xs">

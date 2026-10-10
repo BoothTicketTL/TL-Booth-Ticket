@@ -11,6 +11,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Allow read/write for attendance records per league (real-time sync across devices)
+    match /thaileague_attendance_leagues/{leagueId} {
+      allow read, write: if true;
+    }
+
     // Default catch-all for any app documents
     match /{document=**} {
       allow read, write: if true;

@@ -510,6 +510,44 @@ async function startServer() {
     }
   });
 
+  // Shared In-Memory & Server-side Attendance Storage across all clients
+  let serverAttendanceRecords: any[] = [];
+  let serverAttendanceUpdatedAt: string = '';
+  let serverAttendanceUpdatedBy: string = '';
+
+  app.get('/api/attendance', (req, res) => {
+    res.json({
+      success: true,
+      records: serverAttendanceRecords,
+      updatedAt: serverAttendanceUpdatedAt,
+      updatedBy: serverAttendanceUpdatedBy,
+      count: serverAttendanceRecords.length,
+    });
+  });
+
+  app.post('/api/attendance', (req, res) => {
+    try {
+      const { records, league, updatedBy } = req.body || {};
+      if (Array.isArray(records)) {
+        if (league) {
+          const others = serverAttendanceRecords.filter(r => r.league !== league);
+          serverAttendanceRecords = [...others, ...records];
+        } else {
+          serverAttendanceRecords = records;
+        }
+        serverAttendanceUpdatedAt = new Date().toISOString();
+        serverAttendanceUpdatedBy = updatedBy || 'Admin';
+      }
+      res.json({
+        success: true,
+        count: serverAttendanceRecords.length,
+        updatedAt: serverAttendanceUpdatedAt,
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });

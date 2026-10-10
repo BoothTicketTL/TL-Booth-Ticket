@@ -5,15 +5,28 @@ import { normalizeLeague, normalizeDate, getFixtures } from './fixturesService';
 import { parseSheetDate, parseSheetTime } from './sheetFixtureParser';
 import { resolveOfficialClubName } from './clubNameResolver';
 import { initFirebaseService } from './firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, getDocs, collection, onSnapshot } from 'firebase/firestore';
 
 const LOCAL_ATTENDANCE_KEY = 'thaileague_stadium_attendance_data';
 const LOCAL_ATTENDANCE_UPDATED_KEY = 'thaileague_stadium_attendance_last_updated';
+const FIRESTORE_LEAGUES_COLLECTION = 'thaileague_attendance_leagues';
+const FIRESTORE_CONFIG_DOC = 'attendance_config';
 
 type AttendanceListener = (records: StadiumAttendanceRecord[]) => void;
 const attendanceListeners: Set<AttendanceListener> = new Set();
 
 let cachedAttendance: StadiumAttendanceRecord[] = loadStoredAttendance();
+let isFirestoreListenerInitialized = false;
+
+function sanitizeRecordForFirestore(r: StadiumAttendanceRecord): Record<string, any> {
+  const cleaned: Record<string, any> = {};
+  for (const [key, value] of Object.entries(r)) {
+    if (value !== undefined) {
+      cleaned[key] = value;
+    }
+  }
+  return cleaned;
+}
 
 function fillScoreNumbers(r: StadiumAttendanceRecord): StadiumAttendanceRecord {
   if (r.score && (r.homeScore === undefined || r.awayScore === undefined)) {
@@ -46,9 +59,185 @@ function loadStoredAttendance(): StadiumAttendanceRecord[] {
   return INITIAL_ATTENDANCE_RECORDS.map(fillScoreNumbers);
 }
 
+function notifyAttendanceListeners() {
+  attendanceListeners.forEach(listener => {
+    try {
+      listener([...cachedAttendance]);
+    } catch (err) {
+      console.error(err);
+    }
+  });
+}
+
+/**
+ * Initializes Cloud Firestore real-time listener and background sync for attendance & match results
+ * Runs across all connected devices (Admin and User on desktop and mobile)
+ */
+export function initAttendanceFirestoreSync() {
+  if (isFirestoreListenerInitialized || typeof window === 'undefined') return;
+  isFirestoreListenerInitialized = true;
+
+  try {
+    const { db: firestoreDb } = initFirebaseService();
+    if (firestoreDb) {
+      // 1. Real-time listener on per-league collection (handles large datasets cleanly)
+      const colRef = collection(firestoreDb, FIRESTORE_LEAGUES_COLLECTION);
+      onSnapshot(colRef, (snapshot) => {
+        if (!snapshot.empty) {
+          const remoteRecordsMap = new Map<string, StadiumAttendanceRecord>();
+          snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (Array.isArray(data?.records)) {
+              data.records.forEach((r: any) => {
+                const filled = fillScoreNumbers(r as StadiumAttendanceRecord);
+                const key = `${filled.league}_${filled.homeTeam}_${filled.awayTeam}_${filled.matchDate || filled.matchWeek || ''}`.toLowerCase();
+                remoteRecordsMap.set(key, filled);
+              });
+            }
+          });
+
+          if (remoteRecordsMap.size > 0) {
+            const combined = Array.from(remoteRecordsMap.values());
+            combined.sort((a, b) => {
+              if (b.matchWeek !== a.matchWeek) return b.matchWeek - a.matchWeek;
+              return (b.matchDate || '').localeCompare(a.matchDate || '');
+            });
+
+            cachedAttendance = combined;
+            try {
+              localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(combined));
+            } catch (e) {}
+            notifyAttendanceListeners();
+          }
+        }
+      }, (err) => {
+        console.warn('Firestore attendance leagues listener issue:', err);
+      });
+
+      // 2. Real-time listener on config document fallback
+      const configRef = doc(firestoreDb, 'thaileague_system_config', FIRESTORE_CONFIG_DOC);
+      onSnapshot(configRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (Array.isArray(data?.records) && data.records.length > 0) {
+            const remoteList = data.records.map((r: any) => fillScoreNumbers(r as StadiumAttendanceRecord));
+            if (remoteList.length > cachedAttendance.length || cachedAttendance.length === 0) {
+              cachedAttendance = remoteList;
+              try {
+                localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(remoteList));
+              } catch (e) {}
+              notifyAttendanceListeners();
+            }
+          }
+        }
+      }, (err) => {
+        console.warn('Firestore attendance config listener issue:', err);
+      });
+    }
+  } catch (e) {
+    console.warn('Firestore sync setup failed for attendance:', e);
+  }
+
+  // Initial immediate fetch from cloud and server API
+  syncAttendanceFromCloud().catch(() => {});
+}
+
+/**
+ * Manually or automatically pulls the latest match results and attendance from Firestore and backend API
+ */
+export async function syncAttendanceFromCloud(): Promise<{ success: boolean; count: number }> {
+  let pulledRecords: StadiumAttendanceRecord[] = [];
+
+  // A. Try fetching from Cloud Firestore
+  try {
+    const { db: firestoreDb } = initFirebaseService();
+    if (firestoreDb) {
+      // Check leagues collection
+      const snap = await getDocs(collection(firestoreDb, FIRESTORE_LEAGUES_COLLECTION));
+      if (!snap.empty) {
+        const recordsMap = new Map<string, StadiumAttendanceRecord>();
+        snap.forEach(d => {
+          const dData = d.data();
+          if (Array.isArray(dData?.records)) {
+            dData.records.forEach((r: any) => {
+              const item = fillScoreNumbers(r as StadiumAttendanceRecord);
+              const key = `${item.league}_${item.homeTeam}_${item.awayTeam}_${item.matchDate || item.matchWeek || ''}`.toLowerCase();
+              recordsMap.set(key, item);
+            });
+          }
+        });
+        if (recordsMap.size > 0) {
+          pulledRecords = Array.from(recordsMap.values());
+        }
+      }
+
+      // Check single doc fallback if leagues collection was empty
+      if (pulledRecords.length === 0) {
+        const configSnap = await getDoc(doc(firestoreDb, 'thaileague_system_config', FIRESTORE_CONFIG_DOC));
+        if (configSnap.exists()) {
+          const cData = configSnap.data();
+          if (Array.isArray(cData?.records) && cData.records.length > 0) {
+            pulledRecords = cData.records.map((r: any) => fillScoreNumbers(r as StadiumAttendanceRecord));
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Error fetching attendance from Firestore:', err);
+  }
+
+  // B. Try fetching from Server API (/api/attendance) as HTTP fallback
+  if (pulledRecords.length === 0 && typeof fetch !== 'undefined') {
+    try {
+      const res = await fetch('/api/attendance');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.records) && data.records.length > 0) {
+          pulledRecords = data.records.map((r: any) => fillScoreNumbers(r as StadiumAttendanceRecord));
+        }
+      }
+    } catch (apiErr) {
+      // API fallback silent catch
+    }
+  }
+
+  if (pulledRecords.length > 0) {
+    // Merge or update local cached attendance
+    const map = new Map<string, StadiumAttendanceRecord>();
+    cachedAttendance.forEach(oldItem => {
+      const key = `${oldItem.league}_${oldItem.homeTeam}_${oldItem.awayTeam}_${oldItem.matchDate || oldItem.matchWeek || ''}`.toLowerCase();
+      map.set(key, oldItem);
+    });
+
+    pulledRecords.forEach(newItem => {
+      const key = `${newItem.league}_${newItem.homeTeam}_${newItem.awayTeam}_${newItem.matchDate || newItem.matchWeek || ''}`.toLowerCase();
+      map.set(key, newItem);
+    });
+
+    const merged = Array.from(map.values());
+    merged.sort((a, b) => {
+      if (b.matchWeek !== a.matchWeek) return b.matchWeek - a.matchWeek;
+      return (b.matchDate || '').localeCompare(a.matchDate || '');
+    });
+
+    cachedAttendance = merged;
+    try {
+      localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(merged));
+    } catch (e) {}
+    notifyAttendanceListeners();
+    return { success: true, count: merged.length };
+  }
+
+  return { success: false, count: cachedAttendance.length };
+}
+
 export function subscribeToAttendance(cb: AttendanceListener): () => void {
   attendanceListeners.add(cb);
   cb([...cachedAttendance]);
+
+  // Ensure cross-device Firestore real-time synchronization is started
+  initAttendanceFirestoreSync();
+
   return () => {
     attendanceListeners.delete(cb);
   };
@@ -63,7 +252,7 @@ export function getLastUpdatedAttendance(): string {
 }
 
 /**
- * Saves attendance records with 'replace' or 'merge' strategy
+ * Saves attendance records with 'replace' or 'merge' strategy across devices
  */
 export async function saveAttendanceRecords(
   records: StadiumAttendanceRecord[],
@@ -93,12 +282,12 @@ export async function saveAttendanceRecords(
     // Merge: update matching items or append new ones
     const map = new Map<string, StadiumAttendanceRecord>();
     cachedAttendance.forEach(oldItem => {
-      const key = `${oldItem.league}_${oldItem.matchWeek}_${oldItem.homeTeam}_${oldItem.awayTeam}`.toLowerCase();
+      const key = `${oldItem.league}_${oldItem.homeTeam}_${oldItem.awayTeam}_${oldItem.matchDate || oldItem.matchWeek || ''}`.toLowerCase();
       map.set(key, oldItem);
     });
 
     stamped.forEach(newItem => {
-      const key = `${newItem.league}_${newItem.matchWeek}_${newItem.homeTeam}_${newItem.awayTeam}`.toLowerCase();
+      const key = `${newItem.league}_${newItem.homeTeam}_${newItem.awayTeam}_${newItem.matchDate || newItem.matchWeek || ''}`.toLowerCase();
       map.set(key, newItem);
     });
 
@@ -122,22 +311,32 @@ export async function saveAttendanceRecords(
     console.error('Error storing attendance in localStorage:', e);
   }
 
-  // Notify active UI listeners
-  attendanceListeners.forEach(listener => {
-    try {
-      listener([...cachedAttendance]);
-    } catch (err) {
-      console.error(err);
-    }
-  });
+  // Notify active UI listeners immediately
+  notifyAttendanceListeners();
 
-  // Attempt Firestore sync
+  // Attempt Firestore sync across all leagues
   try {
     const { db: firestoreDb } = initFirebaseService();
     if (firestoreDb) {
-      const docRef = doc(firestoreDb, 'thaileague_system_config', 'attendance_config');
+      const leagues: LeagueType[] = ['League 1', 'League 2', 'League 3'];
+      for (const lg of leagues) {
+        const lgRecords = finalRecords.filter(r => r.league === lg);
+        if (lgRecords.length > 0) {
+          const leagueDocRef = doc(firestoreDb, FIRESTORE_LEAGUES_COLLECTION, lg);
+          await setDoc(leagueDocRef, {
+            league: lg,
+            records: lgRecords.map(sanitizeRecordForFirestore),
+            recordCount: lgRecords.length,
+            updatedAt: nowIso,
+            updatedBy,
+          }, { merge: true });
+        }
+      }
+
+      // Also persist summary config
+      const docRef = doc(firestoreDb, 'thaileague_system_config', FIRESTORE_CONFIG_DOC);
       await setDoc(docRef, {
-        records: finalRecords,
+        records: finalRecords.slice(0, 300).map(sanitizeRecordForFirestore), // safety bounded
         updatedAt: nowIso,
         updatedBy,
         recordCount: finalRecords.length,
@@ -145,6 +344,20 @@ export async function saveAttendanceRecords(
     }
   } catch (e) {
     console.warn('Firestore attendance sync fallback:', e);
+  }
+
+  // Attempt background server sync via /api/attendance
+  if (typeof fetch !== 'undefined') {
+    try {
+      fetch('/api/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          records: finalRecords,
+          updatedBy,
+        }),
+      }).catch(() => {});
+    } catch (e) {}
   }
 }
 
@@ -172,16 +385,16 @@ export async function saveAttendanceRecordsForLeague(
   if (mode === 'replace') {
     updatedLeagueRecords = stamped;
   } else {
-    // Merge: update matching week + teams, or append
+    // Merge: update matching date/week + teams, or append
     const existingThisLeague = cachedAttendance.filter(r => r.league === league);
     const map = new Map<string, StadiumAttendanceRecord>();
     existingThisLeague.forEach(item => {
-      const key = `${item.matchWeek}_${item.homeTeam}_${item.awayTeam}`.toLowerCase();
+      const key = `${item.homeTeam}_${item.awayTeam}_${item.matchDate || item.matchWeek || ''}`.toLowerCase();
       map.set(key, item);
     });
 
     stamped.forEach(newItem => {
-      const key = `${newItem.matchWeek}_${newItem.homeTeam}_${newItem.awayTeam}`.toLowerCase();
+      const key = `${newItem.homeTeam}_${newItem.awayTeam}_${newItem.matchDate || newItem.matchWeek || ''}`.toLowerCase();
       map.set(key, newItem);
     });
 
