@@ -23,6 +23,8 @@ import {
   updateAuthorizedUser, 
   deleteAuthorizedUser, 
   resetAllNamesToCleanEnglish,
+  isUnwantedDummyEmail,
+  saveAuthorizedUsers,
   AuthorizedUser,
   INITIAL_AUTHORIZED_USERS
 } from '../../lib/userManagementService';
@@ -55,6 +57,9 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
 
   // Editing Brands for a specific user State
   const [managingBrandsUserId, setManagingBrandsUserId] = useState<string | null>(null);
+
+  // User Pending Deletion State
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<AuthorizedUser | null>(null);
 
   // Processing & Feedback
   const [isProcessing, setIsProcessing] = useState(false);
@@ -268,70 +273,36 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
 
     try {
       setIsProcessing(true);
-      const res = await deleteAuthorizedUser(user.id);
+      const res = await deleteAuthorizedUser(user.id || user.email);
       if (res.success) {
         refreshCurrentUserRoleAndBrand();
         setNotification({ type: 'success', message: res.message });
+        setConfirmDeleteUser(null);
       } else {
         setNotification({ type: 'error', message: res.message });
       }
+    } catch (e: any) {
+      setNotification({ type: 'error', message: 'เกิดข้อผิดพลาดในการลบ: ' + (e?.message || e) });
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleResetPresetUsers = async () => {
+  const handleCleanDummyUsers = async () => {
     try {
       setIsProcessing(true);
-      // Ensure chitipat.ja is BYD and pakawan.pl is Molten with clean English names
-      const chitipat = users.find(u => u.email.toLowerCase() === 'chitipat.ja@planbmedia.co.th');
-      if (chitipat) {
-        await updateAuthorizedUser(chitipat.id, { 
-          name: 'chitipat.ja (BYD Client)',
-          role: 'user', 
-          assignedBrand: 'BYD' 
+      const cleaned = users.filter(u => !isUnwantedDummyEmail(u.email));
+      if (cleaned.length !== users.length) {
+        await saveAuthorizedUsers(cleaned);
+        setNotification({ 
+          type: 'success', 
+          message: `ล้างอีเมลที่ไม่เกี่ยวข้องออก ${users.length - cleaned.length} รายการเรียบร้อยแล้ว` 
         });
       } else {
-        await addAuthorizedUser({
-          email: 'chitipat.ja@planbmedia.co.th',
-          name: 'chitipat.ja (BYD Client)',
-          role: 'user',
-          assignedBrand: 'BYD',
-          organization: 'Plan B Media / BYD Client',
-          addedBy: 'Admin Reset',
-        });
+        setNotification({ type: 'success', message: 'ตรวจสอบแล้ว: ระบบไม่มีอีเมลที่ไม่เกี่ยวข้อง' });
       }
-
-      const pakawan = users.find(u => u.email.toLowerCase() === 'pakawan.pl@planbmedia.co.th');
-      if (pakawan) {
-        await updateAuthorizedUser(pakawan.id, { 
-          name: 'pakawan.pl (BYD & Molten Client)',
-          role: 'user', 
-          assignedBrand: 'BYD',
-          assignedBrands: ['BYD', 'Molten'],
-          organization: 'Plan B Media / Brand Client',
-          note: 'ลูกค้าแบรนด์ BYD และ Molten (ล็อคสิทธิ์เฉพาะข้อมูลและคำขอของ BYD และ Molten)',
-        });
-      } else {
-        await addAuthorizedUser({
-          email: 'pakawan.pl@planbmedia.co.th',
-          name: 'pakawan.pl (BYD & Molten Client)',
-          role: 'user',
-          assignedBrand: 'BYD',
-          assignedBrands: ['BYD', 'Molten'],
-          organization: 'Plan B Media / Brand Client',
-          addedBy: 'Admin Reset',
-          note: 'ลูกค้าแบรนด์ BYD และ Molten (ล็อคสิทธิ์เฉพาะข้อมูลและคำขอของ BYD และ Molten)',
-        });
-      }
-
-      refreshCurrentUserRoleAndBrand();
-      setNotification({ 
-        type: 'success', 
-        message: 'รีเซ็ตบัญชีตัวอย่างเรียบร้อย: pakawan.pl (ดูแลทั้งแบรนด์ BYD และ Molten) และ chitipat.ja (ดูแล BYD)' 
-      });
     } catch (e: any) {
-      setNotification({ type: 'error', message: e.message || 'เกิดข้อผิดพลาด' });
+      setNotification({ type: 'error', message: 'เกิดข้อผิดพลาด: ' + (e?.message || e) });
     } finally {
       setIsProcessing(false);
     }
@@ -368,13 +339,13 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
 
             <button
               type="button"
-              onClick={handleResetPresetUsers}
+              onClick={handleCleanDummyUsers}
               disabled={isProcessing}
-              title="ตั้งค่า chitipat.ja@planbmedia.co.th (BYD) และ pakawan.pl@planbmedia.co.th (Molten)"
+              title="ล้างอีเมลที่ไม่เกี่ยวข้อง หรืออีเมลอัตโนมัติออกจากระบบทั้งหมดทันที"
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold shadow-xs transition-colors"
             >
-              <Users className="w-3.5 h-3.5 text-slate-500" />
-              <span>ซิงค์บัญชี BYD & Molten</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>ล้างอีเมลที่ไม่เกี่ยวข้อง</span>
             </button>
 
             <button
@@ -869,12 +840,13 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
                       {!isSuperAdmin && (
                         <button
                           type="button"
-                          onClick={() => handleDeleteUser(user)}
+                          onClick={() => setConfirmDeleteUser(user)}
                           disabled={isProcessing}
-                          className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                          title="ลบสิทธิ์ผู้ใช้งานนี้"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 hover:text-rose-700 border border-rose-200 transition-colors shadow-2xs cursor-pointer"
+                          title={`ลบสิทธิ์ผู้ใช้งาน "${user.email}"`}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                          <span>ลบ</span>
                         </button>
                       )}
                     </div>
@@ -937,6 +909,50 @@ export const UserManagementPanel: React.FC<UserManagementPanelProps> = ({ curren
           })}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {confirmDeleteUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-rose-100 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-slate-900">
+                  ยืนยันการลบสิทธิ์ผู้ใช้งาน
+                </h3>
+                <p className="text-xs text-slate-600">
+                  คุณต้องการลบสิทธิ์ของ <span className="font-bold text-slate-900">{confirmDeleteUser.email}</span> ({confirmDeleteUser.name}) ออกจากระบบใช่หรือไม่?
+                </p>
+                <p className="text-[11px] text-rose-600 font-medium">
+                  * เมื่อลบแล้ว E-mail นี้จะไม่สามารถเข้าใช้งานระบบได้อีก จนกว่า Admin จะเพิ่มใหม่
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteUser(null)}
+                disabled={isProcessing}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 border border-slate-200 transition-colors cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteUser(confirmDeleteUser)}
+                disabled={isProcessing}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-xs transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>ยืนยันการลบ</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

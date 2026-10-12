@@ -29,67 +29,25 @@ export const INITIAL_AUTHORIZED_USERS: AuthorizedUser[] = [
     addedBy: 'System',
     note: 'ผู้ดูแลระบบสูงสุด (Super Admin Plan B Media)',
   },
-  {
-    id: 'user-tleague-admin',
-    email: 'admin@thaileague.co.th',
-    name: 'admin@thaileague.co.th (Thai League Admin)',
-    role: 'admin',
-    assignedBrand: 'All',
-    assignedBrands: ['All'],
-    organization: 'Thai League Co., Ltd.',
-    addedAt: '2026-08-01 09:00',
-    addedBy: 'System',
-    note: 'แอดมินสมาคม / ฝ่ายจัดการแข่งขัน',
-  },
-  {
-    id: 'user-client-chitipat-byd',
-    email: 'chitipat.ja@planbmedia.co.th',
-    name: 'chitipat.ja (BYD Client)',
-    role: 'user',
-    assignedBrand: 'BYD',
-    assignedBrands: ['BYD'],
-    organization: 'Plan B Media / BYD Client',
-    addedAt: '2026-09-01 09:00',
-    addedBy: 'siriprapa.po@planbmedia.co.th',
-    note: 'ลูกค้าแบรนด์ BYD (ล็อคสิทธิ์เฉพาะข้อมูลและคำขอของ BYD เท่านั้น)',
-  },
-  {
-    id: 'user-client-pakawan-molten',
-    email: 'pakawan.pl@planbmedia.co.th',
-    name: 'pakawan.pl (BYD & Molten Client)',
-    role: 'user',
-    assignedBrand: 'BYD',
-    assignedBrands: ['BYD', 'Molten'],
-    organization: 'Plan B Media / Brand Client',
-    addedAt: '2026-09-01 09:00',
-    addedBy: 'siriprapa.po@planbmedia.co.th',
-    note: 'ลูกค้าแบรนด์ BYD และ Molten (ล็อคสิทธิ์เฉพาะข้อมูลและคำขอของ BYD และ Molten)',
-  },
-  {
-    id: 'user-client-byd',
-    email: 'client.byd@thaileague.com',
-    name: 'client.byd (BYD Client)',
-    role: 'user',
-    assignedBrand: 'BYD',
-    assignedBrands: ['BYD'],
-    organization: 'BYD Rever Automotive',
-    addedAt: '2026-08-15 10:30',
-    addedBy: 'siriprapa.po@planbmedia.co.th',
-    note: 'ลูกค้าแบรนด์ BYD เข้าถึงเฉพาะข้อมูล BYD',
-  },
-  {
-    id: 'user-client-chang',
-    email: 'client.chang@thaileague.com',
-    name: 'client.chang (Chang Client)',
-    role: 'user',
-    assignedBrand: 'Chang',
-    assignedBrands: ['Chang'],
-    organization: 'Thai Beverage PLC',
-    addedAt: '2026-08-15 10:30',
-    addedBy: 'siriprapa.po@planbmedia.co.th',
-    note: 'ลูกค้าแบรนด์เครื่องดื่มตราช้าง เข้าถึงเฉพาะข้อมูล Chang',
-  },
 ];
+
+/**
+ * Filter out any unwanted dummy, mock, or auto-generated emails
+ * Only real emails authorized by Admin should exist in the system
+ */
+export function isUnwantedDummyEmail(email?: string): boolean {
+  if (!email) return true;
+  const lower = email.toLowerCase().trim();
+  return (
+    lower.includes('@thaileague.com') ||
+    lower.includes('@thaileague.co.th') ||
+    lower.startsWith('client.') ||
+    lower.includes('client.byd') ||
+    lower.includes('client.chang') ||
+    lower.includes('client.sponsor') ||
+    lower.includes('example.com')
+  );
+}
 
 /**
  * Strips undefined values so Firestore SDK never rejects setDoc with:
@@ -115,78 +73,19 @@ function sanitizeUserForStorage(u: AuthorizedUser): Record<string, any> {
   return cleaned;
 }
 
-function combineUserLists(incoming: AuthorizedUser[], existing: AuthorizedUser[]): AuthorizedUser[] {
-  const map = new Map<string, AuthorizedUser>();
-
-  // 1. Put existing cached users first
-  existing.forEach(u => {
-    if (u?.email) {
-      const key = u.email.trim().toLowerCase();
-      const brands = Array.isArray(u.assignedBrands) && u.assignedBrands.length > 0
-        ? u.assignedBrands
-        : [u.assignedBrand || (u.role === 'admin' ? 'All' : 'BYD')];
-      map.set(key, {
-        ...u,
-        assignedBrands: brands,
-        assignedBrand: u.assignedBrand || brands[0],
-      });
-    }
-  });
-
-  // 2. Merge incoming (from Firestore or server API)
-  incoming.forEach(u => {
-    if (u?.email) {
-      const key = u.email.trim().toLowerCase();
-      const prev = map.get(key);
-      const brands = Array.isArray(u.assignedBrands) && u.assignedBrands.length > 0
-        ? u.assignedBrands
-        : (prev?.assignedBrands || [u.assignedBrand || prev?.assignedBrand || (u.role === 'admin' ? 'All' : 'BYD')]);
-
-      map.set(key, {
-        ...(prev || {}),
-        ...u,
-        assignedBrands: brands,
-        assignedBrand: u.assignedBrand || brands[0],
-      });
-    }
-  });
-
-  // 3. Guarantee system initial users exist with clean preset data
-  INITIAL_AUTHORIZED_USERS.forEach(def => {
-    const key = def.email.trim().toLowerCase();
-    if (!map.has(key)) {
-      map.set(key, def);
-    } else {
-      const curr = map.get(key)!;
-      // Guarantee pakawan.pl has both BYD and Molten
-      if (key === 'pakawan.pl@planbmedia.co.th') {
-        let brands = curr.assignedBrands || ['BYD', 'Molten'];
-        if (!brands.includes('BYD')) brands = ['BYD', ...brands];
-        if (!brands.includes('Molten')) brands = [...brands, 'Molten'];
-        map.set(key, {
-          ...curr,
-          role: 'user',
-          assignedBrands: brands,
-          assignedBrand: curr.assignedBrand || 'BYD',
-        });
-      }
-    }
-  });
-
-  return Array.from(map.values());
-}
-
-function mergeUsersWithDefaults(existing: AuthorizedUser[]): AuthorizedUser[] {
-  return combineUserLists(existing, INITIAL_AUTHORIZED_USERS);
-}
-
 let cachedUsers: AuthorizedUser[] = (() => {
   try {
     const raw = localStorage.getItem(LOCAL_USERS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return combineUserLists(parsed, INITIAL_AUTHORIZED_USERS);
+        // Filter out unwanted dummy accounts from existing storage
+        const filtered = parsed.filter((u: any) => !isUnwantedDummyEmail(u?.email));
+        // Always guarantee Super Admin is present
+        if (!filtered.some((u: any) => u?.email?.toLowerCase() === 'siriprapa.po@planbmedia.co.th')) {
+          filtered.unshift(INITIAL_AUTHORIZED_USERS[0]);
+        }
+        return filtered;
       }
     }
   } catch (e) {
@@ -233,9 +132,21 @@ export function subscribeToAuthorizedUsers(callback: UsersListener): () => void 
         onSnapshot(docRef, (snap) => {
           if (snap.exists()) {
             const data = snap.data();
-            if (Array.isArray(data.users) && data.users.length > 0) {
-              const merged = combineUserLists(data.users, cachedUsers);
-              cachedUsers = merged;
+            if (Array.isArray(data.users)) {
+              // Filter out any legacy dummy emails
+              const cleaned = data.users.filter((u: any) => !isUnwantedDummyEmail(u?.email));
+              // Guarantee Super Admin
+              if (!cleaned.some((u: any) => u?.email?.toLowerCase() === 'siriprapa.po@planbmedia.co.th')) {
+                cleaned.unshift(INITIAL_AUTHORIZED_USERS[0]);
+              }
+              // If there were dummy emails in Firestore, scrub them immediately
+              if (cleaned.length !== data.users.length) {
+                setDoc(docRef, {
+                  users: cleaned.map(sanitizeUserForStorage),
+                  updatedAt: new Date().toISOString(),
+                }).catch(() => {});
+              }
+              cachedUsers = cleaned;
               try {
                 localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(cachedUsers));
               } catch (e) {}
@@ -256,8 +167,11 @@ export function subscribeToAuthorizedUsers(callback: UsersListener): () => void 
         .then(r => r.ok ? r.json() : null)
         .then(data => {
           if (Array.isArray(data?.users) && data.users.length > 0) {
-            const merged = combineUserLists(data.users, cachedUsers);
-            cachedUsers = merged;
+            const cleaned = data.users.filter((u: any) => !isUnwantedDummyEmail(u?.email));
+            if (!cleaned.some((u: any) => u?.email?.toLowerCase() === 'siriprapa.po@planbmedia.co.th')) {
+              cleaned.unshift(INITIAL_AUTHORIZED_USERS[0]);
+            }
+            cachedUsers = cleaned;
             try {
               localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(cachedUsers));
             } catch (e) {}
@@ -275,9 +189,20 @@ export function subscribeToAuthorizedUsers(callback: UsersListener): () => void 
 
 /**
  * Save users list to LocalStorage, Cloud Firestore & Server API
+ * Strictly replaces list — never resurrects deleted users!
  */
 export async function saveAuthorizedUsers(users: AuthorizedUser[]): Promise<void> {
-  cachedUsers = combineUserLists(users, cachedUsers);
+  // Clean dummy accounts
+  const cleaned = users.filter(u => !isUnwantedDummyEmail(u?.email));
+
+  // Guarantee Super Admin siriprapa.po is never lost
+  if (!cleaned.some(u => u.email.toLowerCase().trim() === 'siriprapa.po@planbmedia.co.th')) {
+    const superAdmin = INITIAL_AUTHORIZED_USERS.find(u => u.email === 'siriprapa.po@planbmedia.co.th');
+    if (superAdmin) cleaned.unshift(superAdmin);
+  }
+
+  // Set directly to cachedUsers
+  cachedUsers = [...cleaned];
   try {
     localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(cachedUsers));
   } catch (e) {
@@ -287,26 +212,26 @@ export async function saveAuthorizedUsers(users: AuthorizedUser[]): Promise<void
 
   const sanitized = cachedUsers.map(sanitizeUserForStorage);
 
-  // Firestore save
+  // Firestore save - REPLACE document (so deleted users don't remain)
   const { db } = initFirebaseService();
   if (db) {
     try {
       await setDoc(doc(db, 'thaileague_system_config', 'authorized_users'), {
         users: sanitized,
         updatedAt: new Date().toISOString(),
-      }, { merge: true });
+      });
     } catch (e) {
       console.warn('Firestore user save fallback:', e);
     }
   }
 
-  // Server API backup save
+  // Server API backup save - REPLACE
   if (typeof fetch !== 'undefined') {
     try {
       fetch('/api/authorized-users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ users: sanitized }),
+        body: JSON.stringify({ users: sanitized, replace: true }),
       }).catch(() => {});
     } catch (e) {}
   }
@@ -444,17 +369,28 @@ export async function resetAllNamesToCleanEnglish(): Promise<{ success: boolean;
 }
 
 /**
- * Delete an authorized user
+ * Delete an authorized user (by id or email)
+ * Strictly removes user and syncs to storage & Firestore so user is never restored
  */
-export async function deleteAuthorizedUser(id: string): Promise<{ success: boolean; message: string }> {
-  const target = cachedUsers.find(u => u.id === id);
-  if (target?.email === 'siriprapa.po@planbmedia.co.th') {
-    return { success: false, message: 'ไม่สามารถลบ Super Admin หลักของระบบได้' };
+export async function deleteAuthorizedUser(idOrEmail: string): Promise<{ success: boolean; message: string }> {
+  if (!idOrEmail) {
+    return { success: false, message: 'กรุณาระบุผู้ใช้งานที่ต้องการลบ' };
+  }
+  const cleanKey = idOrEmail.toLowerCase().trim();
+  const target = cachedUsers.find(u => u.id === idOrEmail || u.email.toLowerCase().trim() === cleanKey);
+  if (!target) {
+    return { success: false, message: 'ไม่พบผู้ใช้งานที่ต้องการลบในระบบ' };
   }
 
-  const updated = cachedUsers.filter(u => u.id !== id);
+  const cleanTargetEmail = target.email.toLowerCase().trim();
+  if (cleanTargetEmail === 'siriprapa.po@planbmedia.co.th') {
+    return { success: false, message: 'ไม่สามารถลบ Super Admin หลักของระบบ (siriprapa.po@planbmedia.co.th) ได้' };
+  }
+
+  // Filter out the target strictly by both ID and Email
+  const updated = cachedUsers.filter(u => u.id !== target.id && u.email.toLowerCase().trim() !== cleanTargetEmail);
   await saveAuthorizedUsers(updated);
-  return { success: true, message: `ลบสิทธิ์ผู้ใช้งาน "${target?.email || id}" เรียบร้อยแล้ว` };
+  return { success: true, message: `ลบสิทธิ์ผู้ใช้งาน "${target.email}" ออกจากระบบเรียบร้อยแล้ว` };
 }
 
 /**
@@ -486,14 +422,14 @@ export function checkUserRoleByEmail(email: string): {
     };
   }
 
-  // Super Admin Plan B Media & Thai League
-  if (cleanEmail === 'siriprapa.po@planbmedia.co.th' || cleanEmail === 'admin@thaileague.co.th') {
+  // Super Admin Plan B Media
+  if (cleanEmail === 'siriprapa.po@planbmedia.co.th') {
     return {
       isKnown: true,
       role: 'admin',
       assignedBrand: 'All',
       assignedBrands: ['All'],
-      organization: cleanEmail.includes('planb') ? 'Plan B Media Co., Ltd.' : 'Thai League Co., Ltd.',
+      organization: 'Plan B Media Co., Ltd.',
     };
   }
 
@@ -520,7 +456,7 @@ export function findAuthorizedUserByEmail(email?: string): AuthorizedUser | null
 export function isEmailAuthorized(email?: string): boolean {
   if (!email || !email.trim()) return false;
   const cleanEmail = email.trim().toLowerCase();
-  if (cleanEmail === 'siriprapa.po@planbmedia.co.th' || cleanEmail === 'admin@thaileague.co.th') {
+  if (cleanEmail === 'siriprapa.po@planbmedia.co.th') {
     return true;
   }
   return cachedUsers.some(u => u.email.toLowerCase() === cleanEmail);
