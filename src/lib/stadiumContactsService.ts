@@ -20,6 +20,9 @@ import {
 } from './stadiumPhonebookService';
 import { isMatchContactConfirmed } from './matchConfirmationService';
 import { findMasterClubContact } from './clubPhonebookService';
+import { cleanTeamKey } from './matchConfirmationService';
+import { initFirebaseService } from './firebase';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 export interface StadiumContactsSyncMeta {
   source: 'google-sheet' | 'default';
@@ -1161,6 +1164,197 @@ export interface ContactLookupParams {
   customList?: MatchStadiumContact[];
 }
 
+export interface MatchContactOverride {
+  id: string; // key: fixtureId || `${cleanTeamKey(homeClub)}_${matchDate}`
+  fixtureId?: string;
+  matchDate?: string;
+  league?: LeagueType;
+  homeClub?: string;
+  awayTeam?: string;
+  stadiumName?: string;
+  boothCoordinatorName: string;
+  boothCoordinatorPhone: string;
+  ticketCoordinatorName: string;
+  ticketCoordinatorPhone: string;
+  ticketPickupLocation: string;
+  remark?: string;
+  note?: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+const LOCAL_CONTACT_OVERRIDES_KEY = 'thaileague_match_contact_overrides_v1';
+const FIRESTORE_CONTACT_OVERRIDES_COLLECTION = 'thaileague_match_contact_overrides';
+
+let memoryContactOverrides: Record<string, MatchContactOverride> = loadStoredContactOverrides();
+const contactOverrideListeners: Set<(map: Record<string, MatchContactOverride>) => void> = new Set();
+let isFirestoreOverridesListening = false;
+
+function loadStoredContactOverrides(): Record<string, MatchContactOverride> {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(LOCAL_CONTACT_OVERRIDES_KEY);
+      if (raw) return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.error('Error loading contact overrides from localStorage:', e);
+  }
+  return {};
+}
+
+function persistContactOverrides(map: Record<string, MatchContactOverride>): void {
+  memoryContactOverrides = { ...map };
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(LOCAL_CONTACT_OVERRIDES_KEY, JSON.stringify(map));
+    }
+  } catch (e) {
+    console.error('Error saving contact overrides to localStorage:', e);
+  }
+  notifyOverrideListeners();
+}
+
+function notifyOverrideListeners(): void {
+  const copy = { ...memoryContactOverrides };
+  contactOverrideListeners.forEach(cb => {
+    try {
+      cb(copy);
+    } catch (e) {
+      console.error('Error in contact override listener:', e);
+    }
+  });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('match_contact_overrides_updated', { detail: copy }));
+  }
+}
+
+function initFirestoreOverridesSync(): void {
+  if (isFirestoreOverridesListening || typeof window === 'undefined') return;
+  isFirestoreOverridesListening = true;
+
+  try {
+    const { db } = initFirebaseService();
+    if (db) {
+      const colRef = collection(db, FIRESTORE_CONTACT_OVERRIDES_COLLECTION);
+      onSnapshot(colRef, (snapshot) => {
+        const remoteMap: Record<string, MatchContactOverride> = { ...memoryContactOverrides };
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as MatchContactOverride;
+          if (data && data.id) {
+            remoteMap[data.id] = data;
+          }
+        });
+        memoryContactOverrides = remoteMap;
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(LOCAL_CONTACT_OVERRIDES_KEY, JSON.stringify(remoteMap));
+          }
+        } catch {}
+        notifyOverrideListeners();
+      }, (err) => {
+        console.warn('Firestore match contact overrides listener error:', err);
+      });
+    }
+  } catch (e) {
+    console.warn('Error initializing Firestore sync for contact overrides:', e);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  initFirestoreOverridesSync();
+}
+
+export function getMatchContactOverride(params: {
+  fixtureId?: string;
+  matchDate?: string;
+  homeClub?: string;
+}): MatchContactOverride | null {
+  const { fixtureId, matchDate, homeClub } = params;
+  const map = memoryContactOverrides;
+
+  if (fixtureId && map[fixtureId]) {
+    return map[fixtureId];
+  }
+
+  const cHome = cleanTeamKey(homeClub);
+  if (matchDate && cHome) {
+    const dKey = `${matchDate.slice(0, 10)}_${cHome}`;
+    if (map[dKey]) return map[dKey];
+  }
+
+  if (cHome) {
+    for (const key of Object.keys(map)) {
+      const entry = map[key];
+      if (entry && cleanTeamKey(entry.homeClub) === cHome) {
+        if (!matchDate || !entry.matchDate || entry.matchDate.slice(0, 10) === matchDate.slice(0, 10)) {
+          return entry;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+export async function saveMatchContactOverride(override: MatchContactOverride): Promise<void> {
+  const key = override.fixtureId || `${(override.matchDate || '').slice(0, 10)}_${cleanTeamKey(override.homeClub)}`;
+  const item: MatchContactOverride = {
+    ...override,
+    id: key,
+  };
+
+  const updated = { ...memoryContactOverrides, [key]: item };
+  persistContactOverrides(updated);
+
+  try {
+    const { db } = initFirebaseService();
+    if (db) {
+      await setDoc(doc(db, FIRESTORE_CONTACT_OVERRIDES_COLLECTION, key), item);
+    }
+  } catch (err) {
+    console.error('Error saving contact override to Firestore:', err);
+  }
+}
+
+export async function deleteMatchContactOverride(params: {
+  fixtureId?: string;
+  matchDate?: string;
+  homeClub?: string;
+}): Promise<void> {
+  const current = getMatchContactOverride(params);
+  if (!current) return;
+
+  const key = current.id;
+  const copy = { ...memoryContactOverrides };
+  delete copy[key];
+  if (params.fixtureId && copy[params.fixtureId]) {
+    delete copy[params.fixtureId];
+  }
+  const cHome = cleanTeamKey(params.homeClub);
+  if (params.matchDate && cHome) {
+    delete copy[`${params.matchDate.slice(0, 10)}_${cHome}`];
+  }
+
+  persistContactOverrides(copy);
+
+  try {
+    const { db } = initFirebaseService();
+    if (db) {
+      await deleteDoc(doc(db, FIRESTORE_CONTACT_OVERRIDES_COLLECTION, key));
+    }
+  } catch (err) {
+    console.error('Error deleting contact override from Firestore:', err);
+  }
+}
+
+export function subscribeToContactOverrides(callback: () => void): () => void {
+  const listener = () => callback();
+  contactOverrideListeners.add(listener);
+  return () => {
+    contactOverrideListeners.delete(listener);
+  };
+}
+
 export interface StadiumContactLookupResult extends StadiumContact {
   hasUpdatedContact: boolean;
   sourceTab?: string;
@@ -1170,12 +1364,22 @@ export interface StadiumContactLookupResult extends StadiumContact {
   confirmedBy?: string;
   weekLabel?: string;
   weekRangeText?: string;
+  // Overrides & Google Sheet baseline details
+  isOverridden?: boolean;
+  overriddenAt?: string;
+  overriddenBy?: string;
+  sheetBoothCoordinatorName?: string;
+  sheetBoothCoordinatorPhone?: string;
+  sheetTicketCoordinatorName?: string;
+  sheetTicketCoordinatorPhone?: string;
+  sheetRemark?: string;
 }
 
 /**
  * Contact of a match = the row of the HOME club (คอลัมน์ "สโมสรทีมเหย้า") in the contacts sheet, same league.
  * e.g. ราชบุรี เอฟซี vs สุโขทัย เอฟซี  ->  contact of ราชบุรี เอฟซี.
  * If the sheet has no row for that club, every field stays empty (no default names, phones or places).
+ * If admin edited contacts for this match temporarily, use the temporary override values.
  */
 export function findContactForStadiumOrMatch(params: ContactLookupParams): StadiumContactLookupResult {
   const { stadiumName, homeClub, matchDate, league, fixtureId } = params;
@@ -1189,31 +1393,61 @@ export function findContactForStadiumOrMatch(params: ContactLookupParams): Stadi
   });
 
   const row = findLeagueHomeTeamContact(league, homeClub);
-  const hasAny = Boolean(row && (row.boothRawText || row.ticketRawText || row.remark));
+  const override = getMatchContactOverride({ fixtureId, matchDate, homeClub });
+
+  // Baseline from Google Sheet
+  const sheetBoothName = row?.boothCoordinatorName || '';
+  const sheetBoothPhone = row?.boothCoordinatorPhone || '';
+  const sheetTicketName = row?.ticketCoordinatorName || '';
+  const sheetTicketPhone = row?.ticketCoordinatorPhone || '';
+  const sheetRemark = row?.remark || '';
+
+  // Effective values: temporary override takes precedence if present, otherwise Google Sheet
+  const boothCoordinatorName = override ? override.boothCoordinatorName : sheetBoothName;
+  const boothCoordinatorPhone = override ? override.boothCoordinatorPhone : sheetBoothPhone;
+  const ticketCoordinatorName = override ? override.ticketCoordinatorName : sheetTicketName;
+  const ticketCoordinatorPhone = override ? override.ticketCoordinatorPhone : sheetTicketPhone;
+  const ticketPickupLocation = override ? (override.ticketPickupLocation || override.remark || '') : sheetRemark;
+  const remark = override ? (override.remark || override.ticketPickupLocation || '') : sheetRemark;
+
+  const hasAny = Boolean(
+    (override && (boothCoordinatorName || boothCoordinatorPhone || ticketCoordinatorName || ticketCoordinatorPhone)) ||
+    (row && (row.boothRawText || row.ticketRawText || row.remark))
+  );
 
   return {
-    id: row ? row.id : `no-contact_${league || ''}_${homeClub || ''}`,
+    id: override ? `override_${override.id}` : (row ? row.id : `no-contact_${league || ''}_${homeClub || ''}`),
     stadiumName: stadiumName || '',
     league: league || 'League 1',
     homeClub: homeClub || '',
     locationProvince: '',
-    boothCoordinatorName: row?.boothCoordinatorName || '',
-    boothCoordinatorPhone: row?.boothCoordinatorPhone || '',
+    boothCoordinatorName,
+    boothCoordinatorPhone,
     boothSetupLocation: '',
-    ticketCoordinatorName: row?.ticketCoordinatorName || '',
-    ticketCoordinatorPhone: row?.ticketCoordinatorPhone || '',
-    ticketPickupLocation: row?.remark || '', // the sheet's Remark column tells where / how to collect tickets
+    ticketCoordinatorName,
+    ticketCoordinatorPhone,
+    ticketPickupLocation,
     operatingHours: '',
-    note: row?.remark || '',
-    remark: row?.remark || '',
+    note: override?.note || row?.remark || '',
+    remark,
     hasUpdatedContact: Boolean(matchConfirmStatus.isConfirmed && hasAny),
-    sourceTab: row ? `ชีตเบอร์ติดต่อหน้าสนาม (${row.sourceTab})` : 'ไม่พบสโมสรนี้ในชีตเบอร์ติดต่อหน้าสนาม',
+    sourceTab: override
+      ? `แก้ไขเฉพาะแมตช์นี้ชั่วคราว (โดย ${override.updatedBy || 'Admin'})`
+      : (row ? `ชีตเบอร์ติดต่อหน้าสนาม (${row.sourceTab})` : 'ไม่พบสโมสรนี้ในชีตเบอร์ติดต่อหน้าสนาม'),
     isWeeklyConfirmed: matchConfirmStatus.isConfirmed,
     confirmedWeekKey: matchConfirmStatus.confirmedWeekKey,
     confirmedAt: matchConfirmStatus.confirmedAt,
     confirmedBy: matchConfirmStatus.confirmedBy,
     weekLabel: weekInfo.weekLabel,
     weekRangeText: weekInfo.weekRangeText,
+    isOverridden: Boolean(override),
+    overriddenAt: override?.updatedAt,
+    overriddenBy: override?.updatedBy,
+    sheetBoothCoordinatorName: sheetBoothName,
+    sheetBoothCoordinatorPhone: sheetBoothPhone,
+    sheetTicketCoordinatorName: sheetTicketName,
+    sheetTicketCoordinatorPhone: sheetTicketPhone,
+    sheetRemark,
   };
 }
 
@@ -1242,4 +1476,40 @@ export function initContactsAutoSync(intervalMinutes = 10): () => void {
     stopped = true;
     clearInterval(timer);
   };
+}
+
+/**
+ * Check if a registration record has an active BOOTH request
+ * Only true if boothRequired is true AND dealer is actually specified (not '-' or empty), OR boothQuantity > 0
+ */
+export function isRecordBoothRequested(rec: any): boolean {
+  if (!rec || rec.status === 'rejected') return false;
+  const isReq = Boolean(rec.boothRequired);
+  const dealerName = (rec.dealerName || '').trim();
+  const dealerPhone = (rec.dealerPhone || '').trim();
+  const boothQty = Number(rec.boothQuantity || 0);
+
+  const hasDealer = dealerName !== '' && dealerName !== '-';
+  const hasPhone = dealerPhone !== '' && dealerPhone !== '-';
+  
+  return (isReq && (hasDealer || hasPhone || boothQty > 0)) || boothQty > 0;
+}
+
+/**
+ * Check if a registration record has an active TICKET request
+ * Only true if ticketRequired is true AND ticketQuantity is filled and > 0
+ * "หรือไม่กรอกจำนวนรับบัตรมา ไม่ต้องขึ้นเบอร์ติดต่อสนามเรื่องนั้น"
+ */
+export function isRecordTicketRequested(rec: any): boolean {
+  if (!rec || rec.status === 'rejected') return false;
+  const isReq = Boolean(rec.ticketRequired);
+  const qty = Number(rec.ticketQuantity || 0);
+  return isReq && qty > 0;
+}
+
+/**
+ * Check if a registration record has any active request (booth OR ticket)
+ */
+export function isRecordActiveRequest(rec: any): boolean {
+  return isRecordBoothRequested(rec) || isRecordTicketRequested(rec);
 }

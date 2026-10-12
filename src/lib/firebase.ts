@@ -161,13 +161,35 @@ export function initFirebaseService() {
 type Listener = (records: RegistrationRecord[]) => void;
 const listeners: Set<Listener> = new Set();
 
+export function isLegacyDummyRegistration(r: any): boolean {
+  if (!r) return true;
+  const email = (r.applicantEmail || '').toLowerCase();
+  const id = (r.id || '').toLowerCase();
+  return (
+    id.startsWith('reg-2026-10') ||
+    id.startsWith('reg-2025-') ||
+    id === 'reg-muovlq61-rxv5' ||
+    email.includes('thaisoccer.co.th') ||
+    email.includes('thaibev.com') ||
+    email.includes('castrol.co.th') ||
+    email.includes('thainamthip.co.th') ||
+    email.includes('molten.co.th') ||
+    email.includes('ngernhaijai.com') ||
+    email.includes('byddealer.co.th')
+  );
+}
+
 function getInitialLocalRecords(): RegistrationRecord[] {
   try {
     const data = safeGetItem(LOCAL_STORAGE_KEY);
     if (data !== null) {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed)) {
-        return parsed; // Valid array, even if empty [] when user deletes all!
+        const cleaned = parsed.filter(r => !isLegacyDummyRegistration(r));
+        if (cleaned.length !== parsed.length) {
+          safeSetItem(LOCAL_STORAGE_KEY, JSON.stringify(cleaned));
+        }
+        return cleaned; // Valid array, even if empty [] when user deletes all!
       }
     }
   } catch (e) {
@@ -259,7 +281,12 @@ export function subscribeToRegistrations(callback: (records: RegistrationRecord[
             deleteDoc(docSnap.ref).catch(() => {});
             return;
           }
-          list.push({ ...docSnap.data(), id: docSnap.id } as RegistrationRecord);
+          const data = { ...docSnap.data(), id: docSnap.id } as RegistrationRecord;
+          if (isLegacyDummyRegistration(data)) {
+            deleteDoc(docSnap.ref).catch(() => {});
+            return;
+          }
+          list.push(data);
         });
 
         // Sort descending by timestamp in memory

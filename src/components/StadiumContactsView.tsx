@@ -60,8 +60,14 @@ import {
   findContactForStadiumOrMatch,
   findLeagueHomeTeamContact,
   isValidPhoneNumber,
-  formatPhoneNumber
+  formatPhoneNumber,
+  isRecordBoothRequested,
+  isRecordTicketRequested,
+  isRecordActiveRequest,
+  subscribeToContactOverrides,
+  StadiumContactLookupResult
 } from '../lib/stadiumContactsService';
+import { EditMatchContactModal } from './EditMatchContactModal';
 import { getFixturesSheetT1T2Url } from '../lib/fixturesService';
 
 interface StadiumContactsViewProps {
@@ -196,6 +202,11 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
   const [adminConfirmFilter, setAdminConfirmFilter] = useState<'all' | 'pending' | 'confirmed'>('all');
   const [isBulkConfirming, setIsBulkConfirming] = useState<boolean>(false);
 
+  // Match contact override edit modal state (Item 3)
+  const [editingOverrideMatch, setEditingOverrideMatch] = useState<any>(null);
+  const [editingOverrideContact, setEditingOverrideContact] = useState<StadiumContactLookupResult | null>(null);
+  const [isEditOverrideModalOpen, setIsEditOverrideModalOpen] = useState<boolean>(false);
+
   useEffect(() => {
     const unsubContacts = subscribeToMatchContacts((list) => {
       setCustomContacts(list);
@@ -212,6 +223,9 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
     const unsubConfirmations = subscribeToMatchConfirmations(() => {
       setConfirmationsVersion(v => v + 1);
     });
+    const unsubOverrides = subscribeToContactOverrides(() => {
+      setConfirmationsVersion(v => v + 1);
+    });
 
     return () => {
       unsubContacts();
@@ -219,6 +233,7 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
       unsubDate();
       unsubPhonebook();
       unsubConfirmations();
+      unsubOverrides();
     };
   }, []);
 
@@ -486,6 +501,9 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
     if (selectedBrand === 'ALL_STADIUMS') return [];
 
     return secureRecords.filter(record => {
+      // Must have an active booth or ticket request
+      if (!isRecordActiveRequest(record)) return false;
+
       // 1. Must match selected brand
       if (record.brand !== selectedBrand) return false;
 
@@ -1400,138 +1418,143 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Column 2: เจ้าหน้าที่ดูแลบูธหน้าสนาม */}
-                      <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-2 h-full flex flex-col justify-between">
-                        <div>
-                          <div className="flex items-center justify-between gap-1 mb-1.5">
-                            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900">
-                              <Building2 className="w-3.5 h-3.5 text-emerald-700" />
-                              <span>เจ้าหน้าที่ดูแลบูธดีลเลอร์</span>
+                      {/* Column 2: เจ้าหน้าที่ดูแลบูธหน้าสนาม (แสดงเฉพาะเมื่อขอออกบูธ หรือเป็น Admin) */}
+                      {(isUserAdmin || isRecordBoothRequested(record)) && (
+                        <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-2 h-full flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between gap-1 mb-1.5">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900">
+                                <Building2 className="w-3.5 h-3.5 text-emerald-700" />
+                                <span>เจ้าหน้าที่ดูแลบูธดีลเลอร์</span>
+                              </div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">
+                                ฝ่ายบูธ
+                              </span>
                             </div>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">
-                              ฝ่ายบูธ
-                            </span>
-                          </div>
 
-                          <div className="text-xs font-bold text-slate-900">
-                            {stadiumContact.boothCoordinatorName || 'ผู้ประสานงานออกบูธ'}
-                          </div>
-
-                          {/* Display Phone Number ONLY if confirmed by Admin OR viewing as Admin */}
-                          <div className="flex items-center justify-between gap-2 pt-1.5">
-                            {(!isContactConfirmed && !isUserAdmin) ? (
-                              <div className="w-full p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium flex items-center gap-1.5">
-                                <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                <span>รอ Admin ยืนยันเบอร์ก่อนขึ้นเว็บ</span>
-                              </div>
-                            ) : stadiumContact.boothCoordinatorPhone && stadiumContact.boothCoordinatorPhone !== '-' ? (
-                              <div className="flex items-center justify-between gap-2 w-full">
-                                <a
-                                  href={`tel:${stadiumContact.boothCoordinatorPhone}`}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs transition-colors"
-                                >
-                                  <Phone className="w-3.5 h-3.5" />
-                                  <span>{stadiumContact.boothCoordinatorPhone}</span>
-                                </a>
-
-                                <button
-                                  onClick={() => handleCopyPhone(stadiumContact.boothCoordinatorPhone)}
-                                  title="คัดลอกเบอร์โทร"
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-emerald-100 text-emerald-800 text-[11px] font-medium transition-colors cursor-pointer border border-emerald-200"
-                                >
-                                  {copiedPhone === stadiumContact.boothCoordinatorPhone ? (
-                                    <>
-                                      <Check className="w-3 h-3 text-emerald-700" />
-                                      <span>คัดลอกแล้ว</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy className="w-3 h-3" />
-                                      <span>คัดลอก</span>
-                                    </>
-                                  )}
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-amber-700 font-medium">รออัปเดตเบอร์ติดต่อ</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {stadiumContact.boothSetupLocation && (
-                          <div className="pt-2 border-t border-emerald-200/60 text-[11px] text-emerald-800/90 leading-tight">
-                            📍 จุดตั้งบูธ: {stadiumContact.boothSetupLocation}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Column 3: เจ้าหน้าที่ประจำซุ้มรับตั๋วดูบอล */}
-                      <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-200/80 space-y-2 h-full flex flex-col justify-between">
-                        <div>
-                          <div className="flex items-center justify-between gap-1 mb-1.5">
-                            <div className="flex items-center gap-1.5 text-xs font-bold text-blue-900">
-                              <Ticket className="w-3.5 h-3.5 text-blue-700" />
-                              <span>เจ้าหน้าที่ประจำซุ้มตั๋วดูบอล</span>
+                            <div className="text-xs font-bold text-slate-900">
+                              {stadiumContact.boothCoordinatorName || 'ผู้ประสานงานออกบูธ'}
                             </div>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold">
-                              ฝ่ายบัตร
-                            </span>
+
+                            {/* Display Phone Number ONLY if confirmed by Admin OR viewing as Admin */}
+                            <div className="flex items-center justify-between gap-2 pt-1.5">
+                              {(!isContactConfirmed && !isUserAdmin) ? (
+                                <div className="w-full p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium flex items-center gap-1.5">
+                                  <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <span>รอ Admin ยืนยันเบอร์ก่อนขึ้นเว็บ</span>
+                                </div>
+                              ) : stadiumContact.boothCoordinatorPhone && stadiumContact.boothCoordinatorPhone !== '-' ? (
+                                <div className="flex items-center justify-between gap-2 w-full">
+                                  <a
+                                    href={`tel:${stadiumContact.boothCoordinatorPhone}`}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-2xs transition-colors"
+                                  >
+                                    <Phone className="w-3.5 h-3.5" />
+                                    <span>{stadiumContact.boothCoordinatorPhone}</span>
+                                  </a>
+
+                                  <button
+                                    onClick={() => handleCopyPhone(stadiumContact.boothCoordinatorPhone)}
+                                    title="คัดลอกเบอร์โทร"
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-emerald-100 text-emerald-800 text-[11px] font-medium transition-colors cursor-pointer border border-emerald-200"
+                                  >
+                                    {copiedPhone === stadiumContact.boothCoordinatorPhone ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-emerald-700" />
+                                        <span>คัดลอกแล้ว</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>คัดลอก</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-amber-700 font-medium">รออัปเดตเบอร์ติดต่อ</span>
+                              )}
+                            </div>
                           </div>
 
-                          <div className="text-xs font-bold text-slate-900">
-                            {stadiumContact.ticketCoordinatorName || 'ผู้ประสานงานรับบัตร'}
-                          </div>
-
-                          {/* Display Phone Number ONLY if confirmed by Admin OR viewing as Admin */}
-                          <div className="flex items-center justify-between gap-2 pt-1.5">
-                            {(!isContactConfirmed && !isUserAdmin) ? (
-                              <div className="w-full p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium flex items-center gap-1.5">
-                                <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                <span>รอ Admin ยืนยันเบอร์ก่อนขึ้นเว็บ</span>
-                              </div>
-                            ) : stadiumContact.ticketCoordinatorPhone && stadiumContact.ticketCoordinatorPhone !== '-' ? (
-                              <div className="flex items-center justify-between gap-2 w-full">
-                                <a
-                                  href={`tel:${stadiumContact.ticketCoordinatorPhone}`}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-2xs transition-colors"
-                                >
-                                  <Phone className="w-3.5 h-3.5" />
-                                  <span>{stadiumContact.ticketCoordinatorPhone}</span>
-                                </a>
-
-                                <button
-                                  onClick={() => handleCopyPhone(stadiumContact.ticketCoordinatorPhone)}
-                                  title="คัดลอกเบอร์โทร"
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-blue-100 text-blue-800 text-[11px] font-medium transition-colors cursor-pointer border border-blue-200"
-                                >
-                                  {copiedPhone === stadiumContact.ticketCoordinatorPhone ? (
-                                    <>
-                                      <Check className="w-3 h-3 text-blue-700" />
-                                      <span>คัดลอกแล้ว</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy className="w-3 h-3" />
-                                      <span>คัดลอก</span>
-                                    </>
-                                  )}
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-amber-700 font-medium">รออัปเดตเบอร์ติดต่อ</span>
-                            )}
-                          </div>
+                          {stadiumContact.boothSetupLocation && (
+                            <div className="pt-2 border-t border-emerald-200/60 text-[11px] text-emerald-800/90 leading-tight">
+                              📍 จุดตั้งบูธ: {stadiumContact.boothSetupLocation}
+                            </div>
+                          )}
                         </div>
+                      )}
 
-                        {stadiumContact.ticketPickupLocation && (
-                          <div className="pt-2 border-t border-blue-200/60 text-[11px] text-blue-800/90 leading-tight">
-                            🎟️ จุดรับตั๋ว: {stadiumContact.ticketPickupLocation}
+                      {/* Column 3: เจ้าหน้าที่ประจำซุ้มรับตั๋วดูบอล (แสดงเฉพาะเมื่อขอรับบัตร หรือเป็น Admin) */}
+                      {(isUserAdmin || isRecordTicketRequested(record)) && (
+                        <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-200/80 space-y-2 h-full flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between gap-1 mb-1.5">
+                              <div className="flex items-center gap-1.5 text-xs font-bold text-blue-900">
+                                <Ticket className="w-3.5 h-3.5 text-blue-700" />
+                                <span>เจ้าหน้าที่ประจำซุ้มตั๋วดูบอล</span>
+                              </div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-bold">
+                                ฝ่ายบัตร
+                              </span>
+                            </div>
+
+                            <div className="text-xs font-bold text-slate-900">
+                              {stadiumContact.ticketCoordinatorName || 'ผู้ประสานงานรับบัตร'}
+                            </div>
+
+                            {/* Display Phone Number ONLY if confirmed by Admin OR viewing as Admin */}
+                            <div className="flex items-center justify-between gap-2 pt-1.5">
+                              {(!isContactConfirmed && !isUserAdmin) ? (
+                                <div className="w-full p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium flex items-center gap-1.5">
+                                  <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <span>รอ Admin ยืนยันเบอร์ก่อนขึ้นเว็บ</span>
+                                </div>
+                              ) : stadiumContact.ticketCoordinatorPhone && stadiumContact.ticketCoordinatorPhone !== '-' ? (
+                                <div className="flex items-center justify-between gap-2 w-full">
+                                  <a
+                                    href={`tel:${stadiumContact.ticketCoordinatorPhone}`}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-2xs transition-colors"
+                                  >
+                                    <Phone className="w-3.5 h-3.5" />
+                                    <span>{stadiumContact.ticketCoordinatorPhone}</span>
+                                  </a>
+
+                                  <button
+                                    onClick={() => handleCopyPhone(stadiumContact.ticketCoordinatorPhone)}
+                                    title="คัดลอกเบอร์โทร"
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-blue-100 text-blue-800 text-[11px] font-medium transition-colors cursor-pointer border border-blue-200"
+                                  >
+                                    {copiedPhone === stadiumContact.ticketCoordinatorPhone ? (
+                                      <>
+                                        <Check className="w-3 h-3 text-blue-700" />
+                                        <span>คัดลอกแล้ว</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>คัดลอก</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-amber-700 font-medium">รออัปเดตเบอร์ติดต่อ</span>
+                              )}
+                            </div>
                           </div>
-                        )}
-                      </div>
 
-                      {/* Column 4: เวลาทำการ & Remark จาก Google Sheet */}
-                      <div className="p-3.5 rounded-2xl bg-amber-50/50 border border-amber-200/80 space-y-2.5 h-full flex flex-col justify-between">
+                          {stadiumContact.ticketPickupLocation && (
+                            <div className="pt-2 border-t border-blue-200/60 text-[11px] text-blue-800/90 leading-tight">
+                              🎟️ จุดรับตั๋ว: {stadiumContact.ticketPickupLocation}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Column 4: เวลาทำการ & Remark จาก Google Sheet (แสดงเฉพาะเมื่อขอรับบัตร หรือเป็น Admin) */}
+                      {(isUserAdmin || isRecordTicketRequested(record)) && (
+                        <div className="p-3.5 rounded-2xl bg-amber-50/50 border border-amber-200/80 space-y-2.5 h-full flex flex-col justify-between">
                         <div className="space-y-2">
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900">
@@ -1572,6 +1595,7 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
                           อัปเดตล่าสุด: {stadiumContact.sourceTab || 'ฐานข้อมูลระบบ'}
                         </div>
                       </div>
+                      )}
                     </div>
 
                     {/* 3. Interactive Admin Confirmation Action Bar & User Assurance Footer */}
@@ -1605,6 +1629,32 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                          {/* Edit Contact Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const matchItem = {
+                                id: record.fixtureId || record.id,
+                                league: record.league,
+                                matchWeek: 1,
+                                homeTeam: homeClub,
+                                awayTeam,
+                                stadium: record.stadium,
+                                matchDate: record.matchDate,
+                                matchTime: '18:00',
+                                month: record.month,
+                              };
+                              setEditingOverrideMatch(matchItem);
+                              setEditingOverrideContact(stadiumContact as any);
+                              setIsEditOverrideModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold border border-slate-300 shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer"
+                            title="แก้ไขเบอร์ติดต่อหน้าสนามเฉพาะแมตช์นี้ชั่วคราว"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-blue-600" />
+                            <span>แก้ไขเบอร์ติดต่อ</span>
+                          </button>
+
                           {!isContactConfirmed ? (
                             <button
                               type="button"
@@ -2175,6 +2225,22 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Admin Modal: แก้ไขเบอร์ติดต่อหน้าสนาม (ชั่วคราว) (Item 3) */}
+      <EditMatchContactModal
+        isOpen={isEditOverrideModalOpen}
+        onClose={() => {
+          setIsEditOverrideModalOpen(false);
+          setEditingOverrideMatch(null);
+          setEditingOverrideContact(null);
+        }}
+        match={editingOverrideMatch}
+        currentContact={editingOverrideContact}
+        currentUser={currentUser || null}
+        onSuccess={(msg) => {
+          setConfirmationsVersion(v => v + 1);
+        }}
+      />
     </div>
   );
 };
