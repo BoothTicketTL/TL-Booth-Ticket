@@ -1418,8 +1418,8 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Column 2: เจ้าหน้าที่ดูแลบูธหน้าสนาม (แสดงเฉพาะเมื่อขอออกบูธ หรือเป็น Admin) */}
-                      {(isUserAdmin || isRecordBoothRequested(record)) && (
+                      {/* Column 2: เจ้าหน้าที่ดูแลบูธหน้าสนาม (แสดงเฉพาะเมื่อขอออกบูธจริงเท่านั้น) */}
+                      {isRecordBoothRequested(record) && (
                         <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-2 h-full flex flex-col justify-between">
                           <div>
                             <div className="flex items-center justify-between gap-1 mb-1.5">
@@ -1485,8 +1485,8 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
                         </div>
                       )}
 
-                      {/* Column 3: เจ้าหน้าที่ประจำซุ้มรับตั๋วดูบอล (แสดงเฉพาะเมื่อขอรับบัตร หรือเป็น Admin) */}
-                      {(isUserAdmin || isRecordTicketRequested(record)) && (
+                      {/* Column 3: เจ้าหน้าที่ประจำซุ้มรับตั๋วดูบอล (แสดงเฉพาะเมื่อขอรับบัตรจริงเท่านั้น) */}
+                      {isRecordTicketRequested(record) && (
                         <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-200/80 space-y-2 h-full flex flex-col justify-between">
                           <div>
                             <div className="flex items-center justify-between gap-1 mb-1.5">

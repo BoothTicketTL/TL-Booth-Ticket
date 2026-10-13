@@ -1479,32 +1479,95 @@ export function initContactsAutoSync(intervalMinutes = 10): () => void {
 }
 
 /**
+ * Checks if a string or value represents an empty, dash, placeholder, zero, or "no request" value.
+ * e.g. '-', '--', '---', ' - ', '—', '–', '.', '0', 'ไม่มี', 'ไม่ออกบูธ', 'ไม่รับบัตร', 'n/a', etc.
+ */
+export function isMinusOrPlaceholder(val: any): boolean {
+  if (val === null || val === undefined) return true;
+  const str = String(val)
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+  if (str === '') return true;
+
+  const lower = str.toLowerCase();
+  // Any sequence consisting solely of hyphens, dashes, dots, underscores, slashes, or whitespace
+  if (/^[-–—_.\/\s]+$/.test(str)) return true;
+
+  if (
+    lower === '0' ||
+    lower === 'n/a' ||
+    lower === 'na' ||
+    lower === 'null' ||
+    lower === 'none' ||
+    lower === 'undefined' ||
+    lower === 'ไม่มี' ||
+    lower === 'ไม่ออกบูธ' ||
+    lower === 'ไม่รับบัตร' ||
+    lower === 'ไม่ประสงค์' ||
+    lower === 'ไม่ขอรับ' ||
+    lower === 'ไม่ระบุ' ||
+    lower === 'ไม่เอา' ||
+    lower === 'ไม่ต้องการ'
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Check if a registration record has an active BOOTH request
- * Only true if boothRequired is true AND dealer is actually specified (not '-' or empty), OR boothQuantity > 0
+ * Per User Specification:
+ * - ถ้าในช่องกรอกชื่อ+เบอร์ดีลเลอร์ขอออกบูธ กรอก "-" หรือว่าง หรือ 0 = ไม่ออกบูธ (ห้ามขึ้นเบอร์ติดต่อออกบูธเด็ดขาด)
+ * - ต้องมีชื่อดีลเลอร์จริงที่ไม่ใช่ "-" และต้องไม่ระบุ boothRequired = false
  */
 export function isRecordBoothRequested(rec: any): boolean {
   if (!rec || rec.status === 'rejected') return false;
-  const isReq = Boolean(rec.boothRequired);
-  const dealerName = (rec.dealerName || '').trim();
-  const dealerPhone = (rec.dealerPhone || '').trim();
-  const boothQty = Number(rec.boothQuantity || 0);
+  if (rec.boothRequired === false) return false;
 
-  const hasDealer = dealerName !== '' && dealerName !== '-';
-  const hasPhone = dealerPhone !== '' && dealerPhone !== '-';
-  
-  return (isReq && (hasDealer || hasPhone || boothQty > 0)) || boothQty > 0;
+  const dealerName = rec.dealerName;
+
+  // If dealerName is missing or represents '-' / placeholder -> Definitely NOT a booth request!
+  if (isMinusOrPlaceholder(dealerName)) {
+    return false;
+  }
+
+  // If dealerPhone is explicitly provided but is also placeholder AND boothQuantity is 0
+  const dealerPhone = rec.dealerPhone;
+  const cleanPhone = String(dealerPhone || '').trim();
+
+  // If boothQuantity is explicitly specified as 0 or negative
+  if (rec.boothQuantity !== undefined && rec.boothQuantity !== null) {
+    const bQty = Number(rec.boothQuantity);
+    if (!isNaN(bQty) && bQty <= 0) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
  * Check if a registration record has an active TICKET request
- * Only true if ticketRequired is true AND ticketQuantity is filled and > 0
- * "หรือไม่กรอกจำนวนรับบัตรมา ไม่ต้องขึ้นเบอร์ติดต่อสนามเรื่องนั้น"
+ * Per User Specification:
+ * - ถ้าในจำนวนรับบัตรใส่ "-", "0", ว่าง = ไม่รับบัตร (ห้ามขึ้นเบอร์ติดต่อรับบัตรและจุดรับบัตรเด็ดขาด)
+ * - ต้องมีจำนวนบัตรเป็นตัวเลขที่ > 0 และไม่เป็น "-" หรือ 0
  */
 export function isRecordTicketRequested(rec: any): boolean {
   if (!rec || rec.status === 'rejected') return false;
-  const isReq = Boolean(rec.ticketRequired);
-  const qty = Number(rec.ticketQuantity || 0);
-  return isReq && qty > 0;
+  if (rec.ticketRequired === false) return false;
+
+  const qtyVal = rec.ticketQuantity;
+  if (isMinusOrPlaceholder(qtyVal)) {
+    return false;
+  }
+
+  const qty = Number(qtyVal);
+  if (isNaN(qty) || qty <= 0) {
+    return false;
+  }
+
+  return true;
 }
 
 /**

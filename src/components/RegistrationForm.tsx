@@ -83,7 +83,8 @@ import {
 import { 
   findContactForStadiumOrMatch, 
   getStadiumContactsSyncMeta, 
-  subscribeToContactsSync 
+  subscribeToContactsSync,
+  isMinusOrPlaceholder
 } from '../lib/stadiumContactsService';
 import { 
   confirmStadiumForWeek,
@@ -139,27 +140,25 @@ export interface MatchFormEntry {
 
 // Check if a string signifies '-' / 'no booth' / 'no tickets'
 export const isMinusOrNone = (val?: string | null): boolean => {
-  if (!val) return false;
-  const t = val.trim();
-  return t === '-' || t === '--' || t === '—' || t === 'ไม่ออกบูธ' || t === 'ไม่รับบัตร' || t === 'ไม่มี' || t === 'N/A' || t === 'n/a';
+  return isMinusOrPlaceholder(val);
 };
 
 // Check if a booth request is actively wanted (not disabled and not marked as '-')
 export const isBoothActive = (entry?: MatchFormEntry): boolean => {
   if (!entry) return false;
   if (!entry.boothRequired) return false;
-  if (isMinusOrNone(entry.dealerName) || isMinusOrNone(entry.dealerPhone)) return false;
-  return Boolean(entry.dealerName?.trim() && entry.dealerPhone?.trim());
+  if (isMinusOrPlaceholder(entry.dealerName)) return false;
+  return Boolean(entry.dealerName?.trim());
 };
 
 // Check if a ticket request is actively wanted (not disabled, quantity > 0, and not marked as '-')
 export const isTicketActive = (entry?: MatchFormEntry): boolean => {
   if (!entry) return false;
   if (!entry.ticketRequired) return false;
+  if (isMinusOrPlaceholder(entry.ticketQuantity)) return false;
   const qty = Number(entry.ticketQuantity);
   if (isNaN(qty) || qty <= 0) return false;
-  if (isMinusOrNone(entry.ticketRequesterPhone)) return false;
-  return Boolean(entry.ticketRequesterPhone?.trim());
+  return true;
 };
 
 export const RegistrationForm: React.FC<RegistrationFormProps> = ({

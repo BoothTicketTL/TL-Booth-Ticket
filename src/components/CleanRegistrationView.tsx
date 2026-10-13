@@ -49,6 +49,7 @@ import {
 import { getSimulatedDate, subscribeToSimulatedDate, setSimulatedDate, switchUserActiveBrand } from '../lib/firebase';
 import { CURRENT_SIMULATED_DATE } from '../data/fixtures';
 import { createRegistration, updateRegistration } from '../lib/firebase';
+import { isMinusOrPlaceholder } from '../lib/stadiumContactsService';
 
 interface CleanRegistrationViewProps {
   currentUser: UserProfile | null;
@@ -370,21 +371,24 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
       return;
     }
 
-    const hasDealer = Boolean(entry.dealerName.trim());
-    const hasTickets = Boolean(Number(entry.ticketQuantity) > 0);
+    const hasDealer = !isMinusOrPlaceholder(entry.dealerName);
+    const hasTickets = !isMinusOrPlaceholder(entry.ticketQuantity) && Number(entry.ticketQuantity) > 0;
 
-    if (!hasDealer && !hasTickets && !entry.remark.trim()) {
-      alert('กรุณากรอกข้อมูลดีลเลอร์ขอออกบูธ หรือระบุจำนวนบัตรที่ต้องการขอรับ');
+    const existing = records.find(r => r.fixtureId === match.id && r.brand === activeBrand);
+
+    if (!hasDealer && !hasTickets && !entry.remark.trim() && !existing) {
+      alert('กรุณากรอกข้อมูลดีลเลอร์ขอออกบูธ หรือระบุจำนวนบัตรที่ต้องการขอรับ (หากไม่ประสงค์เข้าร่วมแมตช์นี้ ไม่จำเป็นต้องบันทึก)');
       return;
     }
 
     setSubmittingMatchId(match.id);
 
     try {
-      const existing = records.find(r => r.fixtureId === match.id && r.brand === activeBrand);
       const applicantEmail = currentUser?.email || 'applicant@planbmedia.co.th';
       const applicantName = currentUser?.displayName || currentUser?.email?.split('@')[0] || activeBrand;
-      const applicantPhone = entry.dealerPhone || entry.ticketRequesterPhone || '081-234-5678';
+      const applicantPhone = !isMinusOrPlaceholder(entry.dealerPhone) 
+        ? entry.dealerPhone.trim() 
+        : (!isMinusOrPlaceholder(entry.ticketRequesterPhone) ? entry.ticketRequesterPhone.trim() : '081-234-5678');
 
       const payload = {
         league: match.league,
@@ -400,12 +404,12 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
         organization: currentUser?.organization || `แบรนด์ ${activeBrand}`,
         boothRequired: hasDealer,
         dealerName: hasDealer ? entry.dealerName.trim() : '-',
-        dealerPhone: hasDealer ? entry.dealerPhone.trim() : '-',
+        dealerPhone: hasDealer && !isMinusOrPlaceholder(entry.dealerPhone) ? entry.dealerPhone.trim() : '-',
         boothQuantity: hasDealer ? 1 : 0,
         ticketRequired: hasTickets,
-        ticketQuantity: Number(entry.ticketQuantity) || 0,
-        ticketRequesterName: hasTickets ? (entry.dealerName.trim() || applicantName) : '-',
-        ticketRequesterPhone: hasTickets ? (entry.ticketRequesterPhone.trim() || applicantPhone) : '-',
+        ticketQuantity: hasTickets ? (Number(entry.ticketQuantity) || 0) : 0,
+        ticketRequesterName: hasTickets ? (!isMinusOrPlaceholder(entry.dealerName) ? entry.dealerName.trim() : applicantName) : '-',
+        ticketRequesterPhone: hasTickets && !isMinusOrPlaceholder(entry.ticketRequesterPhone) ? entry.ticketRequesterPhone.trim() : '-',
         remark: entry.remark.trim() || '',
         status: existing ? existing.status : 'pending',
       };
@@ -424,7 +428,11 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
         }
       }));
 
-      setToastMessage(`✅ บันทึกข้อมูลแมตช์ ${match.homeTeam} vs ${match.awayTeam} เรียบร้อยแล้ว`);
+      setToastMessage(
+        hasDealer || hasTickets
+          ? `✅ บันทึกข้อมูลแมตช์ ${match.homeTeam} vs ${match.awayTeam} เรียบร้อยแล้ว`
+          : `✅ บันทึกสถานะไม่ประสงค์ออกบูธและไม่รับบัตรสำหรับแมตช์ ${match.homeTeam} vs ${match.awayTeam} เรียบร้อยแล้ว`
+      );
       setTimeout(() => setToastMessage(null), 4000);
     } catch (err: any) {
       alert(`เกิดข้อผิดพลาดในการบันทึก: ${err.message || err}`);

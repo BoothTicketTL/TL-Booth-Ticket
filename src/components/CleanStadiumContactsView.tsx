@@ -1141,7 +1141,7 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                         🎟️ ขอรับบัตร: {ticketBrands.join(', ')}
                       </span>
                     </div>
-                  ) : (
+                  ) : adminHasBooth && adminHasTicket ? (
                     // Admin: Clients requested BOTH Booth AND Tickets -> Show 2-Column layout
                     <div className="rounded-2xl border-2 border-slate-800 bg-white overflow-hidden shadow-2xs divide-y sm:divide-y-0 sm:divide-x-2 divide-slate-800 grid grid-cols-1 sm:grid-cols-2">
                       {/* Left Column: เบอร์ติดต่อออกบูธ */}
@@ -1189,6 +1189,13 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                           ({ticketBrands.join(', ')})
                         </span>
                       </div>
+                    </div>
+                  ) : (
+                    // Admin: Neither Booth nor Tickets requested -> Hide contacts
+                    <div className="rounded-2xl border-2 border-slate-300 bg-slate-50 p-3.5 sm:p-4 text-center">
+                      <span className="text-xs sm:text-sm font-bold text-slate-500">
+                        ไม่มีคำขอออกบูธหรือขอรับบัตรสำหรับแมตช์นี้ (ปิดการแสดงเบอร์ติดต่อ)
+                      </span>
                     </div>
                   )
                 ) : userHasBooth && !userHasTicket ? (
@@ -1249,7 +1256,7 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                       </span>
                     )}
                   </div>
-                ) : (
+                ) : userHasBooth && userHasTicket ? (
                   // User View: Requested BOTH Booth AND Tickets -> Show 2-Column layout
                   <div className="rounded-2xl border-2 border-slate-800 bg-white overflow-hidden shadow-2xs divide-y sm:divide-y-0 sm:divide-x-2 divide-slate-800 grid grid-cols-1 sm:grid-cols-2">
                     {/* Left Column: เบอร์ติดต่อออกบูธ */}
@@ -1309,6 +1316,13 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                         </span>
                       )}
                     </div>
+                  </div>
+                ) : (
+                  // User View: Neither Booth nor Tickets requested -> Hide contacts
+                  <div className="rounded-2xl border-2 border-slate-300 bg-slate-50 p-3.5 sm:p-4 text-center">
+                    <span className="text-xs sm:text-sm font-bold text-slate-500">
+                      ท่านไม่ได้ลงทะเบียนขอออกบูธหรือขอรับบัตรในแมตช์นี้ (ปิดการแสดงเบอร์ติดต่อ)
+                    </span>
                   </div>
                 )}
 
