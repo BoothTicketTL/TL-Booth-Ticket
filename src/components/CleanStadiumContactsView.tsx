@@ -54,6 +54,7 @@ interface CleanStadiumContactsViewProps {
   records?: RegistrationRecord[];
   onBackToHub: () => void;
   onOpenAdmin?: () => void;
+  onNavigateToAdmin?: () => void;
   onSwitchRole?: () => void;
   onNavigateToRegister?: (league?: LeagueType) => void;
 }
@@ -134,9 +135,11 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
   records = [],
   onBackToHub,
   onOpenAdmin,
+  onNavigateToAdmin,
   onSwitchRole,
   onNavigateToRegister,
 }) => {
+  const handleNavigateToAdmin = onNavigateToAdmin || onOpenAdmin;
   const [selectedLeague, setSelectedLeague] = useState<LeagueType>(initialLeague);
   const [fixtures, setFixtures] = useState<FixtureItem[]>(() => getFixtures());
   const [simDate, setSimDate] = useState<string>(() => getSimulatedDate() || '2026-10-09');
@@ -912,11 +915,11 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                 </button>
               </div>
             )}
-            {currentUser?.role === 'admin' && !isUserView && onNavigateToAdmin && (
+            {currentUser?.role === 'admin' && !isUserView && handleNavigateToAdmin && (
               <div className="pt-2">
                 <button
                   type="button"
-                  onClick={onNavigateToAdmin}
+                  onClick={handleNavigateToAdmin}
                   className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 text-xs font-black shadow-md cursor-pointer transition-transform hover:scale-105"
                 >
                   ⚙️ ตรวจสอบคำขอที่รออนุมัติใน Admin Dashboard
