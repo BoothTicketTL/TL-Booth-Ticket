@@ -169,6 +169,8 @@ export function isLegacyDummyRegistration(r: any): boolean {
     id.startsWith('reg-2026-10') ||
     id.startsWith('reg-2025-') ||
     id === 'reg-muovlq61-rxv5' ||
+    id.includes('synth') ||
+    id.includes('mock') ||
     email.includes('thaisoccer.co.th') ||
     email.includes('thaibev.com') ||
     email.includes('castrol.co.th') ||

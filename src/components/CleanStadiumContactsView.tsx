@@ -333,6 +333,22 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     return list.length > 0 ? list[0] : undefined;
   };
 
+  // Helper to get only APPROVED registration records for a match (User requirement: หน้า Admin แสดงเฉพาะคำขอที่ อนุมัติแล้ว)
+  const getMatchApprovedRegistrations = (match: FixtureItem, brandFilter?: string) => {
+    return allRecords.filter(rec => {
+      // Must be approved: "หน้า Admin แสดงเฉพาะคำขอที่ อนุมัติแล้ว"
+      if (rec.status !== 'approved') return false;
+      if (!isRecordActiveRequest(rec)) return false;
+      if (!isRecordMatchingMatch(rec, match)) return false;
+
+      if (brandFilter && brandFilter !== 'All') {
+        const bMatch = isBrandMatch(rec.brand, brandFilter);
+        if (!bMatch) return false;
+      }
+      return true;
+    });
+  };
+
   // Detailed booth & ticket status for a brand on a match
   const getBrandBoothAndTicketStatus = (match: FixtureItem, brandToCheck: string) => {
     const list = getMatchRegistrations(match, brandToCheck);
@@ -371,36 +387,8 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     return `แมตช์วันที่ ${cycle.formattedRange}`;
   }, [cycle]);
 
-  // Filter matches for the selected league for the Friday-to-Thursday match cycle (e.g. 9-15 ต.ค. 2569)
-  const displayedMatches = useMemo(() => {
-    const leagueMatches = fixtures.filter(f => f.league === selectedLeague);
-    if (leagueMatches.length === 0) return [];
-
-    // Filter to matches within Friday-Thursday cycle (inclusive)
-    let weekMatches = leagueMatches.filter(f => {
-      const matchDateStr = f.matchDate;
-      return matchDateStr >= cycle.fridayStr && matchDateStr <= cycle.thursdayStr;
-    });
-
-    // Align League 3 dates so that matches fall on the exact same weekend as League 1 & 2
-    const alignedMatches = weekMatches.map(f => {
-      if (f.league === 'League 3' && f.matchDate === '2026-10-12') {
-        return { ...f, matchDate: '2026-10-11' };
-      }
-      return f;
-    });
-
-    // Sort chronologically by date and kickoff time
-    return alignedMatches.sort((a, b) => {
-      const dateCompare = (a.matchDate || '').localeCompare(b.matchDate || '');
-      if (dateCompare !== 0) return dateCompare;
-      return (a.matchTime || '').localeCompare(b.matchTime || '');
-    });
-  }, [fixtures, selectedLeague, cycle]);
-
-  // Active Registered Matches (Strictly built from genuine user requests with booth or tickets)
-  // "ในหน้าเบอร์ติดต่อ มุมมอง Admin บางแมตช์ทาง User ไม่ได้ส่งคำขอออกบูธรับบัตรมา แต่ทำไมถึงมีขึ้นแมตช์จำลองนั้นโผล่ขึ้นมา ให้แอดมินกดยืนยันเบอร์ติดต่อหน้าสนามล่ะ"
-  // If user did NOT submit booth or ticket request, match NEVER appears!
+  // Active Registered Matches for User View (strictly built from genuine user requests with booth or tickets that match real fixtures)
+  // "ห้ามสมมติคำขอเอง แก้ไขเอาคำขอสมมติออกด้วย"
   const activeRegisteredMatches = useMemo(() => {
     const list: FixtureItem[] = [];
     const seenMatchKeys = new Set<string>();
@@ -411,32 +399,21 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
         return;
       }
 
-      // Find official fixture if exists
+      // Find official fixture if exists - NO SYNTHETIC DUMMY FIXTURES ALLOWED
       const officialFixture = fixtures.find(f => 
-        f.league === rec.league && isRecordMatchingMatch(rec, f)
+        (rec.fixtureId && f.id === rec.fixtureId) ||
+        (f.league === rec.league && isRecordMatchingMatch(rec, f))
       );
 
-      const matchItem: FixtureItem = officialFixture || (() => {
-        const parts = (rec.matchTitle || '').split(/ vs | VS | - /i);
-        const homeTeam = parts[0]?.trim() || (rec as any).homeTeam || 'ทีมเหย้า';
-        const awayTeam = parts[1]?.trim() || (rec as any).awayTeam || 'ทีมเยือน';
-        return {
-          id: rec.fixtureId || `reg-synth-${rec.id}`,
-          league: rec.league,
-          matchWeek: 1,
-          homeTeam,
-          awayTeam,
-          stadium: rec.stadium || 'สนามเหย้า',
-          matchDate: rec.matchDate || '2026-10-10',
-          matchTime: '18:00',
-          month: rec.month || (rec.matchDate ? rec.matchDate.slice(0, 7) : '2026-10'),
-        };
-      })();
+      // PER USER REQUIREMENT: Absolutely NO synthesized/mock matches allowed!
+      if (!officialFixture) {
+        return;
+      }
 
-      const key = `${matchItem.league}_${matchItem.matchDate}_${matchItem.homeTeam}_${matchItem.awayTeam}`;
+      const key = `${officialFixture.league}_${officialFixture.matchDate}_${officialFixture.homeTeam}_${officialFixture.awayTeam}`;
       if (!seenMatchKeys.has(key)) {
         seenMatchKeys.add(key);
-        list.push(matchItem);
+        list.push(officialFixture);
       }
     });
 
@@ -467,36 +444,72 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     });
   }, [activeRegisteredMatches, activeBrand, currentUser, allRecords, simDate]);
 
-  // Admin Registered Matches (all season, across all brands or filtered brand)
-  const adminRegisteredMatchesAllSeason = useMemo(() => {
-    return activeRegisteredMatches.filter(m => {
-      const regs = getMatchRegistrations(m, adminBrand !== 'All' ? adminBrand : undefined);
-      if (regs.length === 0) return false;
+  // Admin View: Strictly APPROVED requests of the selected week (Friday to Thursday) in the selected League
+  // "หน้า Admin แสดงเฉพาะคำขอที่ อนุมัติแล้ว ของ สัปดาห์ที่เลือก (ศุกร์-พฤหัสฯ) ใน ลีกที่เลือก ไม่เอาคำขอสัปดาห์อื่นมารวมแล้ว ลีกไหนไม่มีคำขอ จะขึ้นว่า 'ไม่มีคำขอออกบูธ/รับบัตรในสัปดาห์นี้ 'ในLeague นั้นๆ พร้อมบอกช่วงวันที่ที่ดูอยู่"
+  const adminWeekApprovedMatches = useMemo(() => {
+    // 1. Matches in the selected league during the Friday-to-Thursday cycle
+    const leagueWeekMatches = fixtures.filter(f => {
+      if (f.league !== selectedLeague) return false;
+      const mDate = f.matchDate;
+      return mDate >= cycle.fridayStr && mDate <= cycle.thursdayStr;
+    });
 
-      const hasBooth = regs.some(r => isRecordBoothRequested(r));
-      const hasTicket = regs.some(r => isRecordTicketRequested(r));
+    // 2. Filter to matches having at least one APPROVED booth or ticket request
+    const matched = leagueWeekMatches.filter(match => {
+      const approvedRegs = getMatchApprovedRegistrations(match, adminBrand !== 'All' ? adminBrand : undefined);
+      if (approvedRegs.length === 0) return false;
+      const hasBooth = approvedRegs.some(r => isRecordBoothRequested(r));
+      const hasTicket = approvedRegs.some(r => isRecordTicketRequested(r));
       return hasBooth || hasTicket;
     });
-  }, [activeRegisteredMatches, adminBrand, allRecords]);
+
+    let list = matched;
+    if (hideFinishedMatches) {
+      list = list.filter(m => !(simDate && m.matchDate && simDate > m.matchDate));
+    }
+
+    return list.sort((a, b) => {
+      const dComp = (a.matchDate || '').localeCompare(b.matchDate || '');
+      if (dComp !== 0) return dComp;
+      return (a.matchTime || '').localeCompare(b.matchTime || '');
+    });
+  }, [fixtures, selectedLeague, cycle, allRecords, adminBrand, hideFinishedMatches, simDate]);
+
+  // Counts of approved matches per league for the selected week
+  const adminWeekApprovedCountsByLeague = useMemo(() => {
+    const counts: Record<LeagueType, number> = {
+      'League 1': 0,
+      'League 2': 0,
+      'League 3': 0,
+    };
+
+    (['League 1', 'League 2', 'League 3'] as LeagueType[]).forEach(lg => {
+      const lgMatches = fixtures.filter(f => {
+        if (f.league !== lg) return false;
+        const mDate = f.matchDate;
+        return mDate >= cycle.fridayStr && mDate <= cycle.thursdayStr;
+      });
+      const approvedCount = lgMatches.filter(match => {
+        const approvedRegs = getMatchApprovedRegistrations(match, adminBrand !== 'All' ? adminBrand : undefined);
+        return approvedRegs.some(r => isRecordBoothRequested(r) || isRecordTicketRequested(r));
+      }).length;
+      counts[lg] = approvedCount;
+    });
+
+    return counts;
+  }, [fixtures, cycle, allRecords, adminBrand]);
 
   // Is User View (true for normal user, or admin when testing User View)
   const isUserView = currentUser?.role !== 'admin' || adminViewAsUser;
 
-  // Final matches list based on user mode: Admin ONLY sees matches with active requests
+  // Final matches list based on user mode:
+  // Admin ONLY sees matches with APPROVED requests in the selected Friday-to-Thursday week of selected league!
   const filteredMatchesList = useMemo(() => {
     if (isUserView) {
-      // In User view: ONLY show matches that the user registered for, across all season dates, with expired matches automatically hidden!
       return userRegisteredMatchesAllSeason;
     }
-
-    // In Admin view: ONLY show matches that have actual registered requests from users!
-    let list = adminRegisteredMatchesAllSeason;
-
-    if (hideFinishedMatches) {
-      list = list.filter(m => !(simDate && m.matchDate && simDate > m.matchDate));
-    }
-    return list;
-  }, [isUserView, userRegisteredMatchesAllSeason, adminRegisteredMatchesAllSeason, hideFinishedMatches, simDate]);
+    return adminWeekApprovedMatches;
+  }, [isUserView, userRegisteredMatchesAllSeason, adminWeekApprovedMatches]);
 
   // Admin: Sync stadium contacts from official Google Sheet
   const handleSyncContactsSheet = async () => {
@@ -551,9 +564,13 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Admin: Confirm all matches with active requests
+  // Admin: Confirm all matches with active approved requests
   const handleConfirmAllWeek = async () => {
-    if (filteredMatchesList.length === 0) return;
+    if (filteredMatchesList.length === 0) {
+      setToastMessage(`ℹ️ ไม่มีคำขอที่อนุมัติแล้วใน ${selectedLeague} สำหรับสัปดาห์นี้`);
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
     for (const match of filteredMatchesList) {
       await confirmMatchContact({
         fixtureId: match.id,
@@ -565,7 +582,7 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
       });
     }
     setConfirmVersion(v => v + 1);
-    setToastMessage(`✅ กดยืนยันเบอร์ติดต่อครบทุกแมตช์ที่มีคำขอ (${filteredMatchesList.length} แมตช์) เรียบร้อยแล้ว`);
+    setToastMessage(`✅ กดยืนยันเบอร์ติดต่อครบทุกแมตช์ที่มีคำขออนุมัติ (${filteredMatchesList.length} แมตช์) เรียบร้อยแล้ว`);
     setTimeout(() => setToastMessage(null), 4500);
   };
 
@@ -706,14 +723,25 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                   ? (isSelected ? 'bg-blue-600 text-white shadow-xs' : 'text-blue-700 hover:bg-blue-50')
                   : (isSelected ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-700 hover:bg-emerald-50');
 
+              const approvedCount = adminWeekApprovedCountsByLeague[lg];
+
               return (
                 <button
                   key={lg}
                   type="button"
                   onClick={() => setSelectedLeague(lg)}
-                  className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${colorStyle}`}
+                  className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${colorStyle}`}
                 >
-                  {lg}
+                  <span>{lg}</span>
+                  {!isUserView && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                      approvedCount > 0 
+                        ? (isSelected ? 'bg-white/25 text-white' : 'bg-emerald-100 text-emerald-800')
+                        : (isSelected ? 'bg-white/20 text-white/80' : 'bg-slate-100 text-slate-500')
+                    }`}>
+                      {approvedCount > 0 ? `${approvedCount}` : 'ไม่มีคำขอ'}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -787,18 +815,17 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
             <h2 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight">
               {isUserView 
                 ? `เบอร์ติดต่อเจ้าหน้าที่สนาม (เฉพาะแมตช์ที่ ${activeBrand} ขอออกบูธ/รับบัตรไว้)`
-                : `เบอร์ติดต่อเจ้าหน้าที่สนาม ${weekRangeText}`}
+                : `เบอร์ติดต่อเจ้าหน้าที่สนาม ${selectedLeague} (สัปดาห์วันที่ ${cycle.formattedRange})`}
             </h2>
             <p className="text-xs sm:text-sm font-semibold text-slate-500">
               {isUserView
                 ? `แสดงเบอร์ติดต่อและจุดรับบัตรเฉพาะแมตช์ที่ลงทะเบียนไว้ หลังจากแอดมินกดยืนยันแล้ว (เมื่อหมดวันแข่งจะซ่อนอัตโนมัติ)`
-                : `จุดรับตั๋วและพิกัดผู้ประสานงานสำหรับออกบูธและรับบัตรดูบอล (ข้อมูลยืนยันอย่างเป็นทางการ)`}
+                : `แสดงเฉพาะคำขอที่อนุมัติแล้วของสัปดาห์นี้ (${cycle.formattedRange}) ใน ${selectedLeague}`}
             </p>
           </div>
         </div>
 
-        {/* View Filter Tabs: User Requirement 2 */}
-        {/* "ถ้า User ไม่ได้ลงทะเบียนขอออกบูธรับบัตรในแมตช์แข่งขันนั้นมา ไม่ต้องขึ้นโชว์ชื่อแมตช์แข่งขันนั้นเลยในหน้าเบอร์ติดต่อ และให้ขึ้นเบอร์ติดต่อแมตช์ที่ลงทะเบียนมาทุกแมตช์หลังจากแอดมินกดยืนยันเบอร์แล้ว ไม่ต้องจำกัดวันที่แบบหน้าตารางแข่งขัน แต่พอหมดวันแข่งขันนั้นให้เบอร์ติดต่อแมตช์นั้นๆหายไปเองอัตโนมัติ" */}
+        {/* View Filter Tabs: User Requirement */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 pb-2 border-b border-slate-200/80">
           <div className="flex items-center gap-2 flex-wrap">
             {isUserView ? (
@@ -810,9 +837,12 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
               </div>
             ) : (
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-black shadow-sm">
-                <span>⭐ แมตช์ที่ลูกค้าส่งคำขอออกบูธ/รับบัตร {adminBrand !== 'All' ? `(${adminBrand})` : '(ทุกแบรนด์)'}</span>
+                <span>⭐ คำขอที่อนุมัติแล้วในสัปดาห์นี้ {adminBrand !== 'All' ? `(${adminBrand})` : '(ทุกแบรนด์)'}</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500 text-white">
-                  {adminRegisteredMatchesAllSeason.length} แมตช์
+                  {adminWeekApprovedMatches.length} แมตช์
+                </span>
+                <span className="text-[11px] text-slate-300 font-semibold hidden sm:inline">
+                  (ช่วงวันที่ {cycle.formattedRange})
                 </span>
               </div>
             )}
@@ -842,28 +872,33 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                 }`}
                 title="สลับดูมุมมองเสมือน User ของแบรนด์นี้ เพื่อทดสอบการล็อค/แสดงผล"
               >
-                {adminViewAsUser ? `👁️ มุมมอง User (${adminBrand})` : '👑 โหมด Admin (แสดงทุกแมตช์)'}
+                {adminViewAsUser ? `👁️ มุมมอง User (${adminBrand})` : '👑 โหมด Admin (แสดงคำขออนุมัติแล้ว)'}
               </button>
             )}
           </div>
         </div>
 
-        {/* Empty State: เมื่อไม่มีรายการแมตช์ที่ลงทะเบียนไว้ */}
+        {/* Empty State: ลีกไหนไม่มีคำขอ จะขึ้นว่า "ไม่มีคำขอออกบูธ/รับบัตรในสัปดาห์นี้ "ในLeague นั้นๆ พร้อมบอกช่วงวันที่ที่ดูอยู่ */}
         {filteredMatchesList.length === 0 && (
-          <div className="p-8 sm:p-12 text-center bg-white/90 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm space-y-4 max-w-lg mx-auto my-6">
+          <div className="p-8 sm:p-12 text-center bg-white/90 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm space-y-4 max-w-lg mx-auto my-6 animate-in fade-in">
             <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200">
               <Ticket className="w-7 h-7" />
             </div>
             <div className="space-y-1.5">
-              <h3 className="text-base font-black text-slate-800">
+              <h3 className="text-base sm:text-lg font-black text-slate-800">
                 {isUserView 
                   ? `ยังไม่มีแมตช์ที่ท่านได้ลงทะเบียนขอออกบูธหรือรับบัตรไว้ใน ${selectedLeague}`
-                  : `ไม่มีรายการคำขอในเงื่อนไขที่เลือกสำหรับ ${selectedLeague}`}
+                  : `ไม่มีคำขอออกบูธ/รับบัตรในสัปดาห์นี้`}
               </h3>
-              <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+              <p className="text-xs sm:text-sm font-bold text-slate-600">
                 {isUserView
-                  ? `หน้าเบอร์ติดต่อในมุมมองผู้ใช้งานจะแสดงเฉพาะแมตช์ที่ท่านได้ลงทะเบียนขอออกบูธหรือรับบัตรไว้ และจะขึ้นเบอร์ติดต่อหลังจากแอดมินกดยืนยันเบอร์แล้ว (แมตช์ที่แข่งขันเสร็จสิ้นแล้วจะถูกซ่อนอัตโนมัติ)`
-                  : `ท่านสามารถเลือกดูแบรนด์อื่น หรือเปลี่ยนตัวกรองเป็น "โปรแกรมทุกคู่ในสัปดาห์นี้" ด้านบน`}
+                  ? `หน้าเบอร์ติดต่อในมุมมองผู้ใช้งานจะแสดงเฉพาะแมตช์ที่ท่านได้ลงทะเบียนขอออกบูธหรือรับบัตรไว้`
+                  : `ใน ${selectedLeague} (ช่วงวันที่ ${cycle.formattedRange})`}
+              </p>
+              <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed pt-1">
+                {isUserView
+                  ? `จะขึ้นเบอร์ติดต่อหลังจากแอดมินกดยืนยันเบอร์แล้ว (แมตช์ที่แข่งขันเสร็จสิ้นแล้วจะถูกซ่อนอัตโนมัติ)`
+                  : `ระบบแสดงเฉพาะคำขอที่ "อนุมัติแล้ว" ของสัปดาห์วันที่ ${cycle.formattedRange} ใน ${selectedLeague} โดยไม่นำคำขอสัปดาห์อื่นมารวม`}
               </p>
             </div>
             {onNavigateToRegister && isUserView && (
@@ -874,6 +909,17 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                   className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md cursor-pointer transition-transform hover:scale-105"
                 >
                   👉 ไปที่หน้าลงทะเบียนขอออกบูธ/รับบัตร ({selectedLeague})
+                </button>
+              </div>
+            )}
+            {currentUser?.role === 'admin' && !isUserView && onNavigateToAdmin && (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={onNavigateToAdmin}
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 text-xs font-black shadow-md cursor-pointer transition-transform hover:scale-105"
+                >
+                  ⚙️ ตรวจสอบคำขอที่รออนุมัติใน Admin Dashboard
                 </button>
               </div>
             )}
@@ -894,7 +940,11 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
             });
 
             // Find if current user/brand registered for this match
-            const matchRegs = getMatchRegistrations(match, adminBrand !== 'All' ? adminBrand : undefined);
+            // In Admin view: ONLY consider APPROVED registrations!
+            const matchRegs = !isUserView
+              ? getMatchApprovedRegistrations(match, adminBrand !== 'All' ? adminBrand : undefined)
+              : getMatchRegistrations(match, adminBrand !== 'All' ? adminBrand : undefined);
+
             const userMatchRegs = getMatchRegistrations(match, activeBrand !== 'All' ? activeBrand : undefined, currentUser?.email);
 
             const userHasBooth = userMatchRegs.some(r => isRecordBoothRequested(r));
@@ -967,12 +1017,12 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                     <>
                       {boothBrands.length > 0 && (
                         <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold border border-blue-300">
-                          🎪 ขอออกบูธ: {boothBrands.join(', ')}
+                          🎪 ขอออกบูธ: {boothBrands.join(', ')} (อนุมัติแล้ว)
                         </span>
                       )}
                       {ticketBrands.length > 0 && (
                         <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold border border-emerald-300">
-                          🎟️ ขอรับบัตร: {ticketBrands.join(', ')}
+                          🎟️ ขอรับบัตร: {ticketBrands.join(', ')} (อนุมัติแล้ว)
                         </span>
                       )}
                       {boothBrands.length === 0 && ticketBrands.length === 0 && (

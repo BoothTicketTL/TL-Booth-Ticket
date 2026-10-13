@@ -504,6 +504,9 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
       // Must have an active booth or ticket request
       if (!isRecordActiveRequest(record)) return false;
 
+      // In Admin view: only approved requests
+      if (isUserAdmin && record.status !== 'approved') return false;
+
       // 1. Must match selected brand
       if (record.brand !== selectedBrand) return false;
 
