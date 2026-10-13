@@ -50,6 +50,38 @@ function notifyListeners(): void {
   });
 }
 
+// Cross-tab sync support
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === LOCAL_LOCKS_KEY) {
+      memoryLocks = loadStoredLocks();
+      notifyListeners();
+    }
+  });
+}
+
+/**
+ * Compute Friday-to-Thursday week bounds for any reference date
+ */
+export function getFridayToThursdayBounds(dateStr: string): { friday: string; thursday: string } {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return { friday: dateStr, thursday: dateStr };
+    const day = d.getDay(); // 0: Sun, 1: Mon, ... 5: Fri, 6: Sat
+    const diffToFriday = (day >= 5) ? (day - 5) : (day + 2);
+    const fri = new Date(d);
+    fri.setDate(d.getDate() - diffToFriday);
+    const thu = new Date(fri);
+    thu.setDate(fri.getDate() + 6);
+    return {
+      friday: fri.toISOString().slice(0, 10),
+      thursday: thu.toISOString().slice(0, 10)
+    };
+  } catch {
+    return { friday: dateStr, thursday: dateStr };
+  }
+}
+
 /**
  * Generate cycle key from start and end dates
  */
@@ -58,8 +90,8 @@ export function getCycleLockKey(startDate: string, endDate: string): string {
 }
 
 /**
- * Lock a match week cycle after exporting to LINE Group, and automatically advance date by 7 days
- * "ถ้าข้อมูลมีการ Export ส่ง Line Group เมื่อไหร่ หน้าลงทะเบียนฝั่ง User ให้ล็อคข้อมูลไม่ให้ลงทะเบียนทันทีในทุกๆแมตช์ของสัปดาห์นั้น และเลื่อนข้อมูลแมตช์ 1 สัปดาห์ถัดไปให้อัตโนมัติ"
+ * Lock a match week cycle after exporting to LINE Group
+ * "ในหน้าลงทะเบียน หาก Admin กด Export ส่ง Line Group ของคำขอสัปดาห์นั้นแล้ว เราต้องการให้หน้าลงทะเบียนล็อคไม่ให้แก้ไขทุก League ในช่วงสัปดาห์นั้น แม้ League นั้นจะไม่มีคำขอลงทะเบียนก็ตาม"
  */
 export function lockCycleAfterLineExport(params: {
   startDate: string;
@@ -75,15 +107,20 @@ export function lockCycleAfterLineExport(params: {
     cycleRange,
     lineGroupName = 'LINE Group สรุปคำขอออกบูธและรับบัตร',
     exportedBy = 'Admin',
-    autoAdvanceDays = 7,
+    autoAdvanceDays = 0,
   } = params;
 
-  const key = getCycleLockKey(startDate, endDate);
+  // Ensure effective lock period encompasses the full Friday-to-Thursday cycle
+  const bounds = getFridayToThursdayBounds(startDate);
+  const effectiveStart = bounds.friday < startDate ? bounds.friday : startDate;
+  const effectiveEnd = bounds.thursday > endDate ? bounds.thursday : endDate;
+
+  const key = getCycleLockKey(effectiveStart, effectiveEnd);
   const lockItem: LineExportLock = {
     id: key,
     cycleRange,
-    startDate,
-    endDate,
+    startDate: effectiveStart,
+    endDate: effectiveEnd,
     exportedAt: new Date().toISOString(),
     exportedBy,
     lineGroupName,
@@ -96,7 +133,7 @@ export function lockCycleAfterLineExport(params: {
   };
   persistLocks(updated);
 
-  // Automatically advance match date schedule by 7 days (+1 week)
+  // If autoAdvanceDays is specifically requested
   if (autoAdvanceDays > 0) {
     advanceSimulatedDate(autoAdvanceDays);
   }
@@ -106,16 +143,14 @@ export function lockCycleAfterLineExport(params: {
 
 /**
  * Check if a specific cycle (start/end date) is locked by LINE Export
+ * Matches any active lock that overlaps with the given [startDate, endDate] window
  */
 export function isCycleLockedByLineExport(startDate: string, endDate: string): boolean {
-  const key = getCycleLockKey(startDate, endDate);
-  const item = memoryLocks[key];
-  if (item && item.locked) return true;
-
-  // Also check if any lock overlaps with this date range
+  if (!startDate || !endDate) return false;
   return Object.values(memoryLocks).some(lock => {
     if (!lock.locked) return false;
-    return lock.startDate === startDate || (lock.startDate <= startDate && lock.endDate >= endDate);
+    // Overlap condition: lock.startDate <= endDate AND lock.endDate >= startDate
+    return lock.startDate <= endDate && lock.endDate >= startDate;
   });
 }
 
@@ -145,12 +180,15 @@ export function getLockInfoForDate(matchDate: string): LineExportLock | undefine
  * Admin option to unlock a cycle if needed
  */
 export function unlockCycle(startDate: string, endDate: string): void {
-  const key = getCycleLockKey(startDate, endDate);
   const updated = { ...memoryLocks };
-  if (updated[key]) {
-    updated[key] = { ...updated[key], locked: false };
-    persistLocks(updated);
-  }
+  Object.keys(updated).forEach(key => {
+    const lock = updated[key];
+    // Unlock any lock overlapping with [startDate, endDate]
+    if (lock.startDate <= endDate && lock.endDate >= startDate) {
+      updated[key] = { ...lock, locked: false };
+    }
+  });
+  persistLocks(updated);
 }
 
 /**

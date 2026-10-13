@@ -169,6 +169,7 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
   const [lineLocks, setLineLocks] = useState(() => getLineExportLocks());
   const [isLineExportModalOpen, setIsLineExportModalOpen] = useState(false);
   const [isQuickExportConfirmOpen, setIsQuickExportConfirmOpen] = useState(false);
+  const [advanceWeekOnExport, setAdvanceWeekOnExport] = useState(false);
 
   // Subscribe to real-time fixtures, simDate, and lineLocks
   useEffect(() => {
@@ -250,7 +251,8 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
     return isCycleLockedByLineExport(cycle.fridayStr, cycle.thursdayStr);
   }, [cycle, lineLocks]);
 
-  // Handle Export to LINE Group & Lock & Advance date by 7 days
+  // Handle Export to LINE Group & Lock all leagues for current cycle
+  // "ในหน้าลงทะเบียน หาก Admin กด Export ส่ง Line Group ของคำขอสัปดาห์นั้นแล้ว เราต้องการให้หน้าลงทะเบียนล็อคไม่ให้แก้ไขทุก League ในช่วงสัปดาห์นั้น แม้ League นั้นจะไม่มีคำขอลงทะเบียนก็ตาม"
   const handleConfirmQuickLineExport = () => {
     lockCycleAfterLineExport({
       startDate: cycle.fridayStr,
@@ -258,17 +260,17 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
       cycleRange: cycle.formattedRange,
       lineGroupName: 'LINE Group สรุปคำขอออกบูธและรับบัตร',
       exportedBy: currentUser?.email || 'Admin',
-      autoAdvanceDays: 7,
+      autoAdvanceDays: advanceWeekOnExport ? 7 : 0,
     });
     setIsQuickExportConfirmOpen(false);
-    setToastMessage(`✅ Export ส่ง Line Group สำเร็จ! ล็อคการลงทะเบียนรอบ ${cycle.formattedRange} แล้ว และเลื่อนตารางแข่งขันไปสัปดาห์ถัดไป (+7 วัน) เรียบร้อย`);
+    setToastMessage(`✅ Export ส่ง Line Group สำเร็จ! ล็อคไม่ให้แก้ไขทุก League ในรอบ ${cycle.formattedRange} เรียบร้อยแล้ว${advanceWeekOnExport ? ' (เลื่อนสัปดาห์ถัดไป +7 วันแล้ว)' : ''}`);
     setTimeout(() => setToastMessage(null), 5000);
   };
 
   // Handle Admin unlock for current cycle
   const handleAdminUnlockCurrentCycle = () => {
     unlockCycle(cycle.fridayStr, cycle.thursdayStr);
-    setToastMessage(`🔓 ปลดล็อครอบการแข่งขัน ${cycle.formattedRange} เรียบร้อยแล้ว (User สามารถลงทะเบียนได้ตามปกติ)`);
+    setToastMessage(`🔓 ปลดล็อครอบการแข่งขัน ${cycle.formattedRange} เรียบร้อยแล้ว (สามารถลงทะเบียนและแก้ไขข้อมูลได้ตามปกติ)`);
     setTimeout(() => setToastMessage(null), 4000);
   };
 
@@ -366,8 +368,8 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
     const entry = getMatchForm(match.id);
 
     const isMatchLocked = isCurrentCycleLocked || isMatchDateLockedByLineExport(match.matchDate);
-    if (currentUser?.role !== 'admin' && isMatchLocked) {
-      alert('ไม่สามารถลงทะเบียนได้ เนื่องจากแมตช์ในสัปดาห์นี้ถูก Export ส่ง LINE Group แล้ว และระบบได้ล็อคข้อมูลเรียบร้อยแล้ว');
+    if (isMatchLocked) {
+      alert('ไม่สามารถลงทะเบียนหรือแก้ไขได้ เนื่องจากคำขอของสัปดาห์นี้ถูก Admin กด Export ส่ง Line Group เรียบร้อยแล้ว ระบบล็อคไม่ให้แก้ไขทุก League ในช่วงสัปดาห์นี้ แม้ League นั้นจะไม่มีคำขอลงทะเบียนก็ตาม (หาก Admin ต้องการแก้ไข กรุณากดปุ่มปลดล็อคด้านบนก่อน)');
       return;
     }
 
@@ -602,16 +604,16 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
                 <span>Export ส่ง Line Group</span>
               </button>
 
-              {/* สถานะล็อคฝั่ง User เมื่อ Export ส่ง Line แล้ว */}
+              {/* สถานะล็อคทุก League เมื่อ Export ส่ง Line แล้ว */}
               {isCurrentCycleLocked && (
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-rose-100 border border-rose-300 text-rose-900 text-xs font-black shadow-2xs">
                   <Lock className="w-3.5 h-3.5 text-rose-600" />
-                  <span>สัปดาห์นี้ล็อคแล้ว (ส่ง Line แล้ว)</span>
+                  <span>ล็อคทุก League แล้ว (ส่ง Line แล้ว)</span>
                   <button
                     type="button"
                     onClick={handleAdminUnlockCurrentCycle}
                     className="underline text-[11px] text-rose-700 hover:text-rose-950 font-black ml-1 cursor-pointer"
-                    title="ปลดล็อคให้ผู้ใช้สามารถแก้ไขลงทะเบียนได้อีกครั้ง"
+                    title="ปลดล็อคให้สามารถลงทะเบียนและแก้ไขข้อมูลได้อีกครั้ง"
                   >
                     ปลดล็อค
                   </button>
@@ -652,6 +654,7 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
               return (
                 <button
                   key={lg}
+                  id={`tab-clean-${lg.replace(/\s+/g, '-').toLowerCase()}`}
                   type="button"
                   onClick={() => setSelectedLeague(lg)}
                   className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${colorStyle}`}
@@ -668,6 +671,11 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
                       isSelected ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-700'
                     }`}>
                       {matchCount}
+                    </span>
+                  )}
+                  {isCurrentCycleLocked && (
+                    <span className="text-[10px] ml-0.5" title="สัปดาห์นี้ถูกส่ง LINE Group แล้ว ล็อคไม่ให้แก้ไขทุก League">
+                      🔒
                     </span>
                   )}
                 </button>
@@ -754,12 +762,12 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
                 <Lock className="w-5 h-5 text-amber-900" />
               </div>
               <div className="space-y-0.5 text-left">
-                <p className="text-xs sm:text-sm font-black text-amber-950">
-                  🔒 ปิดรับลงทะเบียนรอบสัปดาห์นี้แล้ว ({cycle.formattedRange})
+                <p className="text-xs sm:text-sm font-black text-amber-950 flex items-center gap-2">
+                  <span>🔒 ปิดรับลงทะเบียนและล็อคไม่ให้แก้ไขทุก League ในสัปดาห์นี้ ({cycle.formattedRange})</span>
                 </p>
                 <p className="text-[11px] sm:text-xs text-amber-800">
-                  ข้อมูลรอบนี้ถูก Export ส่ง Line Group เรียบร้อยแล้ว ระบบล็อคไม่ให้ลงทะเบียนในทุกแมตช์ของสัปดาห์นี้
-                  {currentUser?.role === 'admin' ? ' (แสดงสถานะล็อคฝั่ง User แอดมินสามารถปลดล็อคได้)' : ''}
+                  คำขอในสัปดาห์นี้ถูก Admin กด Export ส่ง Line Group เรียบร้อยแล้ว ระบบล็อคไม่ให้แก้ไขทุก League ในช่วงสัปดาห์นี้ แม้ League นั้นจะไม่มีคำขอลงทะเบียนก็ตาม
+                  {currentUser?.role === 'admin' ? ' (แอดมินสามารถกดปุ่มปลดล็อคเพื่อเปิดให้แก้ไขได้)' : ''}
                 </p>
               </div>
             </div>
@@ -767,13 +775,15 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
               <button
                 type="button"
                 onClick={handleAdminUnlockCurrentCycle}
-                className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-amber-950 border border-amber-400 text-xs font-bold shadow-2xs cursor-pointer shrink-0"
+                className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-amber-950 border border-amber-400 text-xs font-bold shadow-2xs cursor-pointer shrink-0 hover:scale-105 active:scale-95 transition-all"
+                title="คลิกเพื่อปลดล็อคให้สามารถลงทะเบียนและแก้ไขข้อมูลได้อีกครั้ง"
               >
-                🔓 ปลดล็อคให้ User
+                🔓 ปลดล็อคเพื่อแก้ไข
               </button>
             ) : (
-              <span className="px-3.5 py-1.5 rounded-xl bg-amber-200 text-amber-950 text-xs font-black shrink-0 border border-amber-300">
-                ส่ง Line Group แล้ว 🔒
+              <span className="px-3.5 py-1.5 rounded-xl bg-amber-200 text-amber-950 text-xs font-black shrink-0 border border-amber-300 flex items-center gap-1">
+                <Lock className="w-3.5 h-3.5" />
+                <span>ส่ง Line Group แล้ว 🔒</span>
               </span>
             )}
           </div>
@@ -796,7 +806,9 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
                 ในสัปดาห์นี้ไม่มีโปรแกรมการแข่งขันสำหรับรายการ <strong>{selectedLeague}</strong><br className="hidden sm:inline" />
-                ท่านสามารถเลือกแท็บลีกอื่นด้านบนที่มีแมตช์แข่งขันเพื่อดูตารางและลงทะเบียนได้ตามปกติ
+                {isCurrentCycleLocked 
+                  ? 'รอบสัปดาห์นี้ถูก Admin ส่ง Line Group และล็อคข้อมูลเรียบร้อยแล้วในทุก League (รวมถึงลีกที่ไม่มีคำขอลงทะเบียน)'
+                  : 'ท่านสามารถเลือกแท็บลีกอื่นด้านบนที่มีแมตช์แข่งขันเพื่อดูตารางและลงทะเบียนได้ตามปกติ'}
               </p>
             </div>
           </div>
@@ -809,8 +821,9 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
             const isCurrentSubmitting = submittingMatchId === match.id;
             const isSaved = form.isSaved;
             // Lock inputs if current week is exported to LINE Group (User requirement)
+            // "ในหน้าลงทะเบียน หาก Admin กด Export ส่ง Line Group ของคำขอสัปดาห์นั้นแล้ว เราต้องการให้หน้าลงทะเบียนล็อคไม่ให้แก้ไขทุก League ในช่วงสัปดาห์นั้น แม้ League นั้นจะไม่มีคำขอลงทะเบียนก็ตาม"
             const isMatchLocked = isCurrentCycleLocked || isMatchDateLockedByLineExport(match.matchDate);
-            const isFormDisabled = isMatchLocked && currentUser?.role !== 'admin';
+            const isFormDisabled = isMatchLocked;
 
             return (
               <div 
@@ -830,10 +843,10 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
 
                 {/* Top-Right: Status indicator when locked or registered */}
                 <div className="absolute -top-3.5 right-0 z-10 flex items-center gap-1.5">
-                  {isMatchLocked && currentUser?.role !== 'admin' && (
+                  {isMatchLocked && (
                     <span className="bg-rose-100 text-rose-800 border border-rose-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-2xs flex items-center gap-1">
                       <Lock className="w-3 h-3 text-rose-600" />
-                      <span>ส่ง LINE แล้ว (ล็อคข้อมูล)</span>
+                      <span>ส่ง LINE แล้ว (ล็อคข้อมูลทุก League)</span>
                     </span>
                   )}
                   {isSaved && (
@@ -1186,16 +1199,29 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
                 </p>
                 <ul className="space-y-1.5 pl-4 text-emerald-900 list-disc font-medium">
                   <li>
-                    <strong>ล็อคข้อมูลฝั่ง User ทันที:</strong> ปิดรับการลงทะเบียนในทุกๆ แมตช์ของรอบสัปดาห์นี้ ({cycle.formattedRange})
+                    <strong>ล็อคไม่ให้แก้ไขทุก League ทันที:</strong> ปิดรับการลงทะเบียนและล็อคไม่ให้แก้ไขในทุกแมตช์ของรอบสัปดาห์นี้ ({cycle.formattedRange}) ทั้ง League 1, League 2 และ League 3 แม้ League นั้นจะไม่มีคำขอลงทะเบียนก็ตาม
                   </li>
                   <li>
-                    <strong>เลื่อนสัปดาห์อัตโนมัติ:</strong> ปรับเลื่อนรอบตารางการแข่งขันไป 1 สัปดาห์ถัดไป (+7 วัน) ให้อัตโนมัติ เพื่อเตรียมรับการลงทะเบียนรอบใหม่
-                  </li>
-                  <li>
-                    <strong>ส่งข้อมูลไปยัง LINE Group:</strong> สรุปยอดคำขอออกบูธและรับบัตรส่งตัวแทนแบรนด์และสโมสร
+                    <strong>ส่งข้อมูลสรุปไปยัง LINE Group:</strong> สรุปยอดคำขอออกบูธและรับบัตรส่งตัวแทนแบรนด์และสโมสร
                   </li>
                 </ul>
               </div>
+
+              {/* Checkbox option to advance week */}
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer hover:bg-slate-100/70 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={advanceWeekOnExport}
+                  onChange={(e) => setAdvanceWeekOnExport(e.target.checked)}
+                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 mt-0.5 shrink-0"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-slate-900">เลื่อนตารางการแข่งขันไป 1 สัปดาห์ถัดไป (+7 วัน) ทันทีหลัง Export</span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    (หากไม่ติ๊ก ระบบจะคงอยู่ที่สัปดาห์นี้เพื่อให้ตรวจสอบสถานะล็อคทุก League ได้ทันที)
+                  </p>
+                </div>
+              </label>
 
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
                 <span className="font-medium text-slate-600">สถานะปัจจุบันของรอบนี้:</span>

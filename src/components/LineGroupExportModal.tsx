@@ -104,7 +104,7 @@ export const LineGroupExportModal: React.FC<LineGroupExportModalProps> = ({
   const [selectedBrand, setSelectedBrand] = useState<string>('All');
   const [selectedLeague, setSelectedLeague] = useState<string>('All');
   const [exportAllFixturesMode, setExportAllFixturesMode] = useState<boolean>(false);
-  const [advanceDateAfterSend, setAdvanceDateAfterSend] = useState<boolean>(true);
+  const [advanceDateAfterSend, setAdvanceDateAfterSend] = useState<boolean>(false);
   
   // Custom LINE Group Name or override
   const [customGroupName, setCustomGroupName] = useState<string>('');
