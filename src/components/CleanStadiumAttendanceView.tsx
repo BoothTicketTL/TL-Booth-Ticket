@@ -335,20 +335,6 @@ export const CleanStadiumAttendanceView: React.FC<CleanStadiumAttendanceViewProp
         return matchDateStr >= cycle.fridayStr && matchDateStr <= cycle.thursdayStr;
       });
 
-      // If no matches fall strictly in this cycle, fallback to nearest matches
-      if (filteredMatches.length === 0) {
-        const refTime = new Date(cycle.fridayStr).getTime();
-        const sortedByProximity = [...allCandidateMatches].sort((a, b) => {
-          const diffA = Math.abs(new Date(a.matchDate).getTime() - refTime);
-          const diffB = Math.abs(new Date(b.matchDate).getTime() - refTime);
-          return diffA - diffB;
-        });
-
-        if (sortedByProximity.length > 0) {
-          const targetWeek = sortedByProximity[0].matchWeek;
-          filteredMatches = allCandidateMatches.filter(f => f.matchWeek === targetWeek);
-        }
-      }
     } else if (selectedMonth === 'All') {
       // Show ALL matches in the league across the season
       filteredMatches = [...allCandidateMatches];

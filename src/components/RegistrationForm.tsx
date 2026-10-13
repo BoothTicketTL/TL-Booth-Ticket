@@ -421,13 +421,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
     }
   };
 
-  // Filter accessible records: if brand is locked, only allow access to records of that brand
+  // Filter accessible records strictly for the active selected brand
   const accessibleRecords = useMemo(() => {
-    if (isBrandLocked && assignedBrand) {
-      return records.filter(r => r.brand === assignedBrand);
-    }
-    return records;
-  }, [records, isBrandLocked, assignedBrand]);
+    return (records || []).filter(r => r.brand === selectedBrand);
+  }, [records, selectedBrand]);
 
   // Filter for Next 7 Days (Defaults to TRUE per user specification)
   const [showOnlyNext7Days, setShowOnlyNext7Days] = useState(true);
@@ -435,6 +432,12 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = ({
   // Multi-match selection state (Fixture IDs)
   const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([]);
   const [matchEntries, setMatchEntries] = useState<Record<string, MatchFormEntry>>({});
+
+  // Reset selected matches and draft match entries when selectedBrand changes
+  useEffect(() => {
+    setSelectedMatchIds([]);
+    setMatchEntries({});
+  }, [selectedBrand]);
 
   // Client-revealed on-site stadium contacts state (revealed on-demand by client)
   const [revealedContactMatchIds, setRevealedContactMatchIds] = useState<Record<string, boolean>>({});

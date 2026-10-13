@@ -29,6 +29,30 @@ export const INITIAL_AUTHORIZED_USERS: AuthorizedUser[] = [
     addedBy: 'System',
     note: 'ผู้ดูแลระบบสูงสุด (Super Admin Plan B Media)',
   },
+  {
+    id: 'user-planb-naphaphach',
+    email: 'naphaphach.ph@planbmedia.co.th',
+    name: 'naphaphach.ph (Chang & เงินให้ใจ)',
+    role: 'user',
+    assignedBrand: 'Chang',
+    assignedBrands: ['Chang', 'เงินให้ใจ'],
+    organization: 'Plan B Media Co., Ltd.',
+    addedAt: '2026-08-01 09:00',
+    addedBy: 'System',
+    note: 'ผู้ดูแลแบรนด์ Chang และ เงินให้ใจ',
+  },
+  {
+    id: 'user-planb-pakawan',
+    email: 'pakawan.pl@planbmedia.co.th',
+    name: 'pakawan.pl (BYD & Molten)',
+    role: 'user',
+    assignedBrand: 'BYD',
+    assignedBrands: ['BYD', 'Molten'],
+    organization: 'Plan B Media Co., Ltd.',
+    addedAt: '2026-08-01 09:00',
+    addedBy: 'System',
+    note: 'ผู้ดูแลแบรนด์ BYD และ Molten',
+  },
 ];
 
 /**
@@ -405,7 +429,8 @@ export function checkUserRoleByEmail(email: string): {
   organization?: string;
 } {
   const cleanEmail = email.trim().toLowerCase();
-  const matched = cachedUsers.find(u => u.email.toLowerCase() === cleanEmail);
+  const matched = cachedUsers.find(u => u.email.toLowerCase() === cleanEmail) 
+    || INITIAL_AUTHORIZED_USERS.find(u => u.email.toLowerCase() === cleanEmail);
 
   if (matched) {
     const brands = Array.isArray(matched.assignedBrands) && matched.assignedBrands.length > 0

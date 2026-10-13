@@ -174,6 +174,35 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </div>
             <User className="w-4 h-4 text-amber-600 shrink-0 group-hover:scale-110 transition-transform" />
           </button>
+
+          {/* Account 4: naphaphach.ph@planbmedia.co.th (Chang & เงินให้ใจ) */}
+          <button
+            type="button"
+            id="btn-login-naphaphach-preset"
+            disabled={isLoggingIn}
+            onClick={() => handleQuickSignIn(
+              'naphaphach.ph@planbmedia.co.th',
+              'naphaphach.ph (Chang & เงินให้ใจ)',
+              'user'
+            )}
+            className="w-full flex items-center justify-between p-2.5 rounded-xl border border-sky-200 bg-sky-50/50 hover:bg-sky-100/60 transition-all text-left group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-sky-600 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                NP
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5">
+                  <span>naphaphach.ph</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-600 text-white font-medium">สลับ: Chang / เงินให้ใจ</span>
+                </div>
+                <div className="text-[11px] text-sky-800 truncate">
+                  naphaphach.ph@planbmedia.co.th
+                </div>
+              </div>
+            </div>
+            <User className="w-4 h-4 text-sky-600 shrink-0 group-hover:scale-110 transition-transform" />
+          </button>
         </div>
 
         {/* Divider */}

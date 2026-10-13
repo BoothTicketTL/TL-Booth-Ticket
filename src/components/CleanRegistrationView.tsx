@@ -151,8 +151,8 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
   const [fixtures, setFixtures] = useState<FixtureItem[]>(() => getFixtures());
   const [simDate, setSimDate] = useState<string>(() => getSimulatedDate() || '2026-10-09');
   
-  // Per-match form entries state (keyed by fixtureId)
-  const [formEntries, setFormEntries] = useState<Record<string, MatchFormState>>({});
+  // Per-brand and per-match form entries state (strictly partitioned by brand e.g. BYD, Molten)
+  const [brandFormEntries, setBrandFormEntries] = useState<Record<string, Record<string, MatchFormState>>>({});
   const [submittingMatchId, setSubmittingMatchId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -273,97 +273,97 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
   };
 
   // Filter matches for the selected league for the Friday-to-Thursday match cycle (inclusive)
+  // "ถ้า League ไหนไม่มีแข่งขันช่วงนั้น ให้ขึ้นแจ้งว่าไม่มีแมตช์แข่งขันในสัปดาห์นี้ League ไหนมีแมตช์แข่งขันก็ขึ้นตารางแข่งขันตามปกติ"
   const displayedMatches = useMemo(() => {
     const leagueMatches = fixtures.filter(f => f.league === selectedLeague);
     if (leagueMatches.length === 0) return [];
 
-    // Filter to matches within Friday-Thursday cycle (inclusive)
-    let weekMatches = leagueMatches.filter(f => {
+    // Filter strictly to matches within Friday-Thursday cycle (inclusive)
+    const weekMatches = leagueMatches.filter(f => {
       const matchDateStr = f.matchDate;
       return matchDateStr >= cycle.fridayStr && matchDateStr <= cycle.thursdayStr;
     });
 
-    // If no matches fall strictly in this cycle, fallback to closest matches
-    if (weekMatches.length === 0) {
-      const refTime = new Date(cycle.fridayStr).getTime();
-      const sortedByProximity = [...leagueMatches].sort((a, b) => {
-        const diffA = Math.abs(new Date(a.matchDate).getTime() - refTime);
-        const diffB = Math.abs(new Date(b.matchDate).getTime() - refTime);
-        return diffA - diffB;
-      });
-
-      if (sortedByProximity.length > 0) {
-        const targetWeek = sortedByProximity[0].matchWeek;
-        weekMatches = leagueMatches.filter(f => f.matchWeek === targetWeek);
-      }
-    }
-
-    // Align League 3 dates so that matches fall on the exact same weekend as League 1 & 2
-    // ("ของลีก 1-2 ขึ้นตารางแข่งวันที่ 9-11 ต.ค.2569 แต่ทำไมลีก 3 เป็นแมตช์วันที่ 10-12 ต.ค.2569 ควรเป็นช่วงวันที่แข่งขันเดียวกัน ปรับหน่อย")
-    const alignedMatches = weekMatches.map(f => {
-     
-      return f;
-    });
-
     // Sort chronologically by date and kickoff time
-    return alignedMatches.sort((a, b) => {
+    return [...weekMatches].sort((a, b) => {
       const dateCompare = (a.matchDate || '').localeCompare(b.matchDate || '');
       if (dateCompare !== 0) return dateCompare;
       return (a.matchTime || '').localeCompare(b.matchTime || '');
     });
   }, [fixtures, selectedLeague, cycle]);
 
-  // Prepopulate form entries with existing saved records for this user/brand
-  useEffect(() => {
-    if (!records || records.length === 0) return;
-
-    setFormEntries(prev => {
-      const updated = { ...prev };
-      records.forEach(rec => {
-        if (rec.brand === activeBrand && rec.fixtureId) {
-          if (!updated[rec.fixtureId]) {
-            updated[rec.fixtureId] = {
-              dealerName: rec.dealerName && rec.dealerName !== '-' ? rec.dealerName : '',
-              dealerPhone: rec.dealerPhone && rec.dealerPhone !== '-' ? rec.dealerPhone : '',
-              ticketQuantity: rec.ticketQuantity && rec.ticketQuantity > 0 ? String(rec.ticketQuantity) : '',
-              ticketRequesterPhone: rec.ticketRequesterPhone && rec.ticketRequesterPhone !== '-' ? rec.ticketRequesterPhone : '',
-              remark: rec.remark || '',
-              isSaved: true,
-            };
-          }
+  // Compute number of matches per league in this week cycle for display in league tabs
+  const leagueMatchCounts = useMemo(() => {
+    const counts: Record<LeagueType, number> = {
+      'League 1': 0,
+      'League 2': 0,
+      'League 3': 0,
+    };
+    fixtures.forEach(f => {
+      if (f.matchDate >= cycle.fridayStr && f.matchDate <= cycle.thursdayStr) {
+        if (counts[f.league] !== undefined) {
+          counts[f.league] += 1;
         }
-      });
-      return updated;
-    });
-  }, [records, activeBrand]);
-
-  // Update a single field in a match entry
-  const updateField = (fixtureId: string, field: keyof MatchFormState, value: string) => {
-    setFormEntries(prev => ({
-      ...prev,
-      [fixtureId]: {
-        ...(prev[fixtureId] || {
-          dealerName: '',
-          dealerPhone: '',
-          ticketQuantity: '',
-          ticketRequesterPhone: '',
-          remark: '',
-        }),
-        [field]: value,
-        isSaved: false,
       }
-    }));
-  };
+    });
+    return counts;
+  }, [fixtures, cycle]);
 
-  // Handle saving an individual match (Confirm button clicked for that match)
-  const handleConfirmMatch = async (match: FixtureItem) => {
-    const entry = formEntries[match.id] || {
+  // Helper: Retrieve form state for a specific match under the currently ACTIVE brand (BYD, Molten, etc.)
+  // "เมื่อสลับเป็น Molten ควรเห็นเฉพาะข้อมูลของ Molten ส่วนคำขอของ BYD ควรแสดงเฉพาะเมื่ออยู่ในแบรนด์ BYD เท่านั้น"
+  const getMatchForm = (fixtureId: string): MatchFormState => {
+    // 1. Check in-memory draft / edits for the active brand
+    const brandMap = brandFormEntries[activeBrand];
+    if (brandMap && brandMap[fixtureId]) {
+      return brandMap[fixtureId];
+    }
+
+    // 2. Otherwise check saved records strictly for this active brand
+    const savedRec = (records || []).find(r => r.fixtureId === fixtureId && r.brand === activeBrand);
+    if (savedRec) {
+      return {
+        dealerName: savedRec.dealerName && savedRec.dealerName !== '-' ? savedRec.dealerName : '',
+        dealerPhone: savedRec.dealerPhone && savedRec.dealerPhone !== '-' ? savedRec.dealerPhone : '',
+        ticketQuantity: savedRec.ticketQuantity && savedRec.ticketQuantity > 0 ? String(savedRec.ticketQuantity) : '',
+        ticketRequesterPhone: savedRec.ticketRequesterPhone && savedRec.ticketRequesterPhone !== '-' ? savedRec.ticketRequesterPhone : '',
+        remark: savedRec.remark || '',
+        isSaved: true,
+      };
+    }
+
+    // 3. Otherwise return pristine blank form
+    return {
       dealerName: '',
       dealerPhone: '',
       ticketQuantity: '',
       ticketRequesterPhone: '',
       remark: '',
+      isSaved: false,
     };
+  };
+
+  // Update a single field in a match entry strictly for the active brand
+  const updateField = (fixtureId: string, field: keyof MatchFormState, value: string) => {
+    setBrandFormEntries(prev => {
+      const brandMap = prev[activeBrand] || {};
+      const currentForm = brandMap[fixtureId] || getMatchForm(fixtureId);
+      return {
+        ...prev,
+        [activeBrand]: {
+          ...brandMap,
+          [fixtureId]: {
+            ...currentForm,
+            [field]: value,
+            isSaved: false,
+          }
+        }
+      };
+    });
+  };
+
+  // Handle saving an individual match (Confirm button clicked for that match)
+  const handleConfirmMatch = async (match: FixtureItem) => {
+    const entry = getMatchForm(match.id);
 
     const isMatchLocked = isCurrentCycleLocked || isMatchDateLockedByLineExport(match.matchDate);
     if (currentUser?.role !== 'admin' && isMatchLocked) {
@@ -374,7 +374,7 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
     const hasDealer = !isMinusOrPlaceholder(entry.dealerName);
     const hasTickets = !isMinusOrPlaceholder(entry.ticketQuantity) && Number(entry.ticketQuantity) > 0;
 
-    const existing = records.find(r => r.fixtureId === match.id && r.brand === activeBrand);
+    const existing = (records || []).find(r => r.fixtureId === match.id && r.brand === activeBrand);
 
     if (!hasDealer && !hasTickets && !entry.remark.trim() && !existing) {
       alert('กรุณากรอกข้อมูลดีลเลอร์ขอออกบูธ หรือระบุจำนวนบัตรที่ต้องการขอรับ (หากไม่ประสงค์เข้าร่วมแมตช์นี้ ไม่จำเป็นต้องบันทึก)');
@@ -420,18 +420,21 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
         await createRegistration(payload);
       }
 
-      setFormEntries(prev => ({
+      setBrandFormEntries(prev => ({
         ...prev,
-        [match.id]: {
-          ...entry,
-          isSaved: true,
+        [activeBrand]: {
+          ...(prev[activeBrand] || {}),
+          [match.id]: {
+            ...entry,
+            isSaved: true,
+          }
         }
       }));
 
       setToastMessage(
         hasDealer || hasTickets
-          ? `✅ บันทึกข้อมูลแมตช์ ${match.homeTeam} vs ${match.awayTeam} เรียบร้อยแล้ว`
-          : `✅ บันทึกสถานะไม่ประสงค์ออกบูธและไม่รับบัตรสำหรับแมตช์ ${match.homeTeam} vs ${match.awayTeam} เรียบร้อยแล้ว`
+          ? `✅ บันทึกข้อมูลแมตช์ ${match.homeTeam} vs ${match.awayTeam} (แบรนด์ ${activeBrand}) เรียบร้อยแล้ว`
+          : `✅ บันทึกสถานะไม่ประสงค์ออกบูธและไม่รับบัตรสำหรับแมตช์ ${match.homeTeam} vs ${match.awayTeam} (แบรนด์ ${activeBrand}) เรียบร้อยแล้ว`
       );
       setTimeout(() => setToastMessage(null), 4000);
     } catch (err: any) {
@@ -637,6 +640,8 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
           <div className="flex items-center bg-white/80 backdrop-blur-md p-1 rounded-2xl border border-slate-300 shadow-2xs">
             {(['League 1', 'League 2', 'League 3'] as LeagueType[]).map((lg) => {
               const isSelected = selectedLeague === lg;
+              const matchCount = leagueMatchCounts[lg] || 0;
+              const hasMatches = matchCount > 0;
               const colorStyle = 
                 lg === 'League 1' 
                   ? (isSelected ? 'bg-rose-600 text-white shadow-xs' : 'text-rose-700 hover:bg-rose-50')
@@ -649,9 +654,22 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
                   key={lg}
                   type="button"
                   onClick={() => setSelectedLeague(lg)}
-                  className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${colorStyle}`}
+                  className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${colorStyle}`}
                 >
-                  {lg}
+                  <span>{lg}</span>
+                  {!hasMatches ? (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-200/90 text-slate-500'
+                    }`}>
+                      ไม่มีแข่ง
+                    </span>
+                  ) : (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                      isSelected ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                      {matchCount}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -761,29 +779,33 @@ export const CleanRegistrationView: React.FC<CleanRegistrationViewProps> = ({
           </div>
         )}
 
-        {/* Empty State */}
+        {/* Empty State: ถ้า League ไหนไม่มีแข่งขันช่วงนั้น ให้ขึ้นแจ้งว่าไม่มีแมตช์แข่งขันในสัปดาห์นี้ */}
         {displayedMatches.length === 0 && (
-          <div className="p-12 text-center bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm space-y-3">
-            <Calendar className="w-10 h-10 text-slate-400 mx-auto" />
-            <h3 className="text-base font-bold text-slate-800">
-              ไม่มีโปรแกรมการแข่งขันในรอบสัปดาห์นี้สำหรับ {selectedLeague}
-            </h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              อาจเป็นสัปดาห์พักเบรกทีมชาติหรือยังไม่มีโปรแกรมในระบบ ท่านสามารถเลือกลีกอื่นด้านบนเพื่อลงทะเบียน
-            </p>
+          <div className="p-8 sm:p-12 text-center bg-white/95 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm space-y-4 max-w-xl mx-auto my-6 animate-in fade-in">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto shadow-2xs">
+              <Calendar className="w-8 h-8" />
+            </div>
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200">
+                <span>{selectedLeague}</span>
+                <span>•</span>
+                <span>{weekRangeText}</span>
+              </div>
+              <h3 className="text-base sm:text-xl font-black text-slate-900">
+                ไม่มีแมตช์แข่งขันในสัปดาห์นี้
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed">
+                ในสัปดาห์นี้ไม่มีโปรแกรมการแข่งขันสำหรับรายการ <strong>{selectedLeague}</strong><br className="hidden sm:inline" />
+                ท่านสามารถเลือกแท็บลีกอื่นด้านบนที่มีแมตช์แข่งขันเพื่อดูตารางและลงทะเบียนได้ตามปกติ
+              </p>
+            </div>
           </div>
         )}
 
         {/* Matches List: Exact Mockup Layout with Input Fields (as per uploaded image) */}
         <div className="space-y-12 sm:space-y-14 pt-4">
           {displayedMatches.map((match) => {
-            const form = formEntries[match.id] || {
-              dealerName: '',
-              dealerPhone: '',
-              ticketQuantity: '',
-              ticketRequesterPhone: '',
-              remark: '',
-            };
+            const form = getMatchForm(match.id);
             const isCurrentSubmitting = submittingMatchId === match.id;
             const isSaved = form.isSaved;
             // Lock inputs if current week is exported to LINE Group (User requirement)

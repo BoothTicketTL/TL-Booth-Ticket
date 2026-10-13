@@ -382,21 +382,6 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
       return matchDateStr >= cycle.fridayStr && matchDateStr <= cycle.thursdayStr;
     });
 
-    // If no matches fall strictly in this cycle, fallback to nearest matches
-    if (weekMatches.length === 0) {
-      const refTime = new Date(cycle.fridayStr).getTime();
-      const sortedByProximity = [...leagueMatches].sort((a, b) => {
-        const diffA = Math.abs(new Date(a.matchDate).getTime() - refTime);
-        const diffB = Math.abs(new Date(b.matchDate).getTime() - refTime);
-        return diffA - diffB;
-      });
-
-      if (sortedByProximity.length > 0) {
-        const targetWeek = sortedByProximity[0].matchWeek;
-        weekMatches = leagueMatches.filter(f => f.matchWeek === targetWeek);
-      }
-    }
-
     // Align League 3 dates so that matches fall on the exact same weekend as League 1 & 2
     const alignedMatches = weekMatches.map(f => {
       if (f.league === 'League 3' && f.matchDate === '2026-10-12') {
