@@ -335,6 +335,7 @@ export default function App() {
                 currentUser={currentUser}
                 onOpenSheetsModal={() => handleOpenSheetsModal('export')}
                 onNavigateToContacts={() => setActiveTab('contacts')}
+                onNavigateToMonthly={() => setActiveTab('monthly')}
                 onResetData={handleResetData}
               />
             ) : (

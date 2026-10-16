@@ -25,14 +25,20 @@ import {
   Mail,
   Send,
   Search,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Flame,
+  ShieldCheck
 } from 'lucide-react';
 import { RegistrationRecord, LeagueType, UserProfile } from '../types';
 import { LEAGUE_COLOR_MAP, SPONSOR_BRANDS } from '../data/fixtures';
 import { DonutPieChart, PieChartSegment } from './DonutPieChart';
 import { SeasonProportionPieCard } from './SeasonProportionPieCard';
 import { StadiumPopularityChart } from './StadiumPopularityChart';
+import { AttendanceTopTenSection } from './AttendanceTopTenSection';
+import { BrandQuotasPrivilegesSection } from './BrandQuotasPrivilegesSection';
 import { AutoEmailExportModal, EmailExportPayload } from './AutoEmailExportModal';
+import { getAttendanceRecords } from '../lib/attendanceService';
+import { DEFAULT_SPONSOR_BRANDS, calculateBrandQuota } from '../lib/brandService';
 import { 
   SUPPORTED_SEASONS, 
   DEFAULT_SEASON, 
@@ -76,8 +82,12 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
   // Active view mode: 'season-overview' (ภาพรวมทั้งฤดูกาล) or 'monthly-detail' (เจาะลึกรายเดือน)
   const [viewMode, setViewMode] = useState<'season-overview' | 'monthly-detail'>('season-overview');
 
-  // Topic Tab state: 'overview' | 'proportions' | 'stadiums'
-  const [activeTopicTab, setActiveTopicTab] = useState<'overview' | 'proportions' | 'stadiums'>('overview');
+  // Internal League Filter: Defaults to 'All' to ensure ALL leagues (League 1, 2, 3) are aggregated!
+  // "ในหน้าสรุปยอดแยกรายเดือน ตอนนี้ BYD มีส่งคำขอออกบูธ League 1-3 รวมกันมา แค่ข้อมูลกลับขึ้นสถิติคำขอออกบูธรับบัตรมาแค่ของ League 1 คำขอใน League 2-3 ไม่มีขึ้นมาเลย เราต้องการให้ขึ้นคำขอของทุก League เพื่อสรุปแบบถูกต้อง"
+  const [internalLeagueFilter, setInternalLeagueFilter] = useState<LeagueType | 'All'>('All');
+
+  // Topic Tab state: 'overview' | 'proportions' | 'attendance' | 'quotas' | 'stadiums'
+  const [activeTopicTab, setActiveTopicTab] = useState<'overview' | 'proportions' | 'attendance' | 'quotas' | 'stadiums'>('overview');
 
   // Email Export Modal State
   const [emailModalPayload, setEmailModalPayload] = useState<EmailExportPayload | null>(null);
@@ -105,25 +115,34 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
     }
   };
 
-  // 1. Season level summary calculation
+  // 1. Season level summary calculation (using internalLeagueFilter)
   const seasonSummary = useMemo(() => {
-    return computeSeasonSummary(selectedSeason, accessibleRecords, selectedLeagueFilter);
-  }, [selectedSeason, accessibleRecords, selectedLeagueFilter]);
+    return computeSeasonSummary(selectedSeason, accessibleRecords, internalLeagueFilter);
+  }, [selectedSeason, accessibleRecords, internalLeagueFilter]);
+
+  // Full season summary across ALL leagues (used for the Brand Matrix table so all 3 leagues are accurately shown)
+  const fullSeasonSummary = useMemo(() => {
+    return computeSeasonSummary(selectedSeason, accessibleRecords, 'All');
+  }, [selectedSeason, accessibleRecords]);
 
   // Records belonging to the active selected season
   const seasonRecords = useMemo(() => {
     return accessibleRecords.filter(r => {
       const s = getRecordSeason(r);
       if (s !== selectedSeason) return false;
-      if (selectedLeagueFilter !== 'All' && r.league !== selectedLeagueFilter) return false;
+      if (internalLeagueFilter !== 'All') {
+        const normRecLg = r.league === 'Thai League 1' ? 'League 1' : r.league === 'Thai League 2' ? 'League 2' : r.league === 'Thai League 3' ? 'League 3' : r.league;
+        const normSelLg = internalLeagueFilter === 'Thai League 1' ? 'League 1' : internalLeagueFilter === 'Thai League 2' ? 'League 2' : internalLeagueFilter === 'Thai League 3' ? 'League 3' : internalLeagueFilter;
+        if (normRecLg !== normSelLg) return false;
+      }
       return true;
     });
-  }, [accessibleRecords, selectedSeason, selectedLeagueFilter]);
+  }, [accessibleRecords, selectedSeason, internalLeagueFilter]);
 
   // 2. Active month summary calculation (for monthly detail view)
   const monthSummary = useMemo(() => {
-    return computeMonthSummary(activeMonthKey, seasonRecords, selectedLeagueFilter);
-  }, [activeMonthKey, seasonRecords, selectedLeagueFilter]);
+    return computeMonthSummary(activeMonthKey, seasonRecords, internalLeagueFilter);
+  }, [activeMonthKey, seasonRecords, internalLeagueFilter]);
 
   // Records for the active month
   const activeMonthRecords = useMemo(() => {
@@ -245,7 +264,7 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
     window.scrollTo({ top: 380, behavior: 'smooth' });
   };
 
-  // 3 Main Topics for clean tabbed layout
+  // 5 Main Topics for clean tabbed layout
   const TOPIC_TABS = useMemo(() => [
     {
       id: 'overview' as const,
@@ -262,9 +281,23 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
       desc: '2.1 ขอออกบูธอย่างเดียว / 2.2 ขอรับบัตรอย่างเดียว / 2.3 ขอทั้งคู่',
     },
     {
+      id: 'attendance' as const,
+      label: '3. อันดับยอดผู้ชม 10 สนาม',
+      shortLabel: 'ยอดผู้ชม 10 สนาม',
+      icon: Flame,
+      desc: 'ตารางจัดอันดับ 10 สนาม แมตช์คนดูเยอะที่สุด (รวมทุกลีก & แยกลีก)',
+    },
+    {
+      id: 'quotas' as const,
+      label: '4. สรุปโควต้า & สิทธิ์แต่ละแบรนด์',
+      shortLabel: 'โควต้า & สิทธิ์แบรนด์',
+      icon: ShieldCheck,
+      desc: 'ย้ายจากแดชบอร์ด: สรุปโควต้ารับบัตร-ออกบูธ และสิทธิ์ตามสัญญาของทุกแบรนด์',
+    },
+    {
       id: 'stadiums' as const,
-      label: '3. สถิติสนามยอดนิยม',
-      shortLabel: 'สนามยอดนิยม',
+      label: '5. กิจกรรมตามสนาม',
+      shortLabel: 'สนามจัดกิจกรรม',
       icon: Trophy,
       desc: 'จัดอันดับสนามเหย้าที่มีการขอออกบูธและรับบัตรมากที่สุด',
     },
@@ -285,7 +318,7 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
   };
 
   // Helper to build topic export payload & intuitive Thai filenames
-  const buildTopicExportData = (topic: 'overview' | 'proportions' | 'stadiums') => {
+  const buildTopicExportData = (topic: 'overview' | 'proportions' | 'stadiums' | 'attendance' | 'quotas') => {
     const isMonth = viewMode === 'monthly-detail';
     const currentRecords = isMonth ? activeMonthRecords : seasonRecords;
     const currentScopeLabel = isMonth ? `${activeMonthInfo.nameThai} (${activeMonthKey})` : `ทั้งฤดูกาล ${selectedSeason}`;
@@ -445,6 +478,79 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
         'จำนวนบัตรรวม (ใบ)': s.tickets,
         'แบรนด์ผู้สนับสนุน': s.brands.join(', ') || '-',
       }));
+    } else if (topic === 'attendance') {
+      topicTitle = `อันดับยอดผู้ชม 10 สนาม (Top 10 Attendance) - ${currentScopeLabel}`;
+      suggestedFilename = isMonth
+        ? `อันดับยอดผู้ชม 10 สนาม เดือน${monthName} พ.ศ. ${beYear}.xlsx`
+        : `อันดับยอดผู้ชม 10 สนาม ฤดูกาล ${selectedSeason.replace('/', '-')}.xlsx`;
+
+      const attList = getAttendanceRecords().filter(r => (r.attendance || 0) > 0);
+      const sortedAtt = [...attList].sort((a, b) => (b.attendance || 0) - (a.attendance || 0)).slice(0, 10);
+      const topAttMatch = sortedAtt[0];
+
+      summaryMetrics = [
+        {
+          label: 'แมตช์ยอดผู้ชมสูงสุดอันดับ 1',
+          value: topAttMatch ? `${topAttMatch.attendance.toLocaleString()} คน` : '-',
+          subtext: topAttMatch ? `${topAttMatch.homeTeam} พบ ${topAttMatch.awayTeam} (${topAttMatch.stadium})` : undefined
+        },
+        {
+          label: 'ยอดผู้ชมเฉลี่ย Top 10',
+          value: sortedAtt.length > 0 ? `${Math.round(sortedAtt.reduce((s, r) => s + r.attendance, 0) / sortedAtt.length).toLocaleString()} คน` : '-',
+          subtext: 'จาก 10 แมตช์ยอดนิยมสูงสุด'
+        },
+        {
+          label: 'อัตราการเข้าชมเฉลี่ย Top 10',
+          value: sortedAtt.length > 0 ? `${(sortedAtt.reduce((s, r) => s + (r.occupancyRate || 0), 0) / sortedAtt.length).toFixed(1)}%` : '-',
+          subtext: 'เทียบอัตราความจุสนามเหย้า'
+        }
+      ];
+
+      customTableData = sortedAtt.map((r, idx) => ({
+        'อันดับ': idx + 1,
+        'ลีก': r.league,
+        'คู่แข่งขัน': `${r.homeTeam} พบ ${r.awayTeam}`,
+        'สนามเหย้า': r.stadium,
+        'จังหวัด': r.province || '-',
+        'ยอดผู้ชม (คน)': r.attendance,
+        'ความจุสนาม (ที่นั่ง)': r.capacity,
+        'อัตราการเข้าชม (%)': `${r.occupancyRate}%`,
+        'วันที่แข่งขัน': r.matchDate,
+        'เวลา': r.matchTime || '-',
+        'ผลการแข่งขัน': r.score || '-',
+      }));
+    } else if (topic === 'quotas') {
+      topicTitle = `สรุปโควต้ารับบัตร & สิทธิ์แต่ละแบรนด์ (Brand Quotas & Rights) - ฤดูกาล ${selectedSeason}`;
+      suggestedFilename = isMonth
+        ? `โควต้าและสิทธิ์แบรนด์ เดือน${monthName} พ.ศ. ${beYear}.xlsx`
+        : `สรุปโควต้าและสิทธิ์แบรนด์ ฤดูกาล ${selectedSeason.replace('/', '-')}.xlsx`;
+
+      const allQuotas = DEFAULT_SPONSOR_BRANDS.map(b => ({
+        brand: b,
+        quota: calculateBrandQuota(b, accessibleRecords, selectedSeason)
+      }));
+
+      const totalQuotaBooths = allQuotas.reduce((s, q) => s + q.quota.quotaBoothMatches, 0);
+      const totalUsedBooths = allQuotas.reduce((s, q) => s + q.quota.usedBoothMatches, 0);
+      const totalQuotaTickets = allQuotas.reduce((s, q) => s + q.quota.quotaTotalTickets, 0);
+      const totalUsedTickets = allQuotas.reduce((s, q) => s + q.quota.usedTotalTickets, 0);
+
+      summaryMetrics = [
+        { label: 'จำนวนแบรนด์ในระบบ', value: `${DEFAULT_SPONSOR_BRANDS.length} แบรนด์`, subtext: 'ผู้สนับสนุนหลัก' },
+        { label: 'โควต้าออกบูธรวม', value: `${totalUsedBooths} / ${totalQuotaBooths} ครั้ง`, subtext: `คงเหลือ ${totalQuotaBooths - totalUsedBooths} ครั้ง` },
+        { label: 'โควต้ารับบัตรรวม', value: `${totalUsedTickets.toLocaleString()} / ${totalQuotaTickets.toLocaleString()} ใบ`, subtext: `คงเหลือ ${(totalQuotaTickets - totalUsedTickets).toLocaleString()} ใบ` },
+      ];
+
+      customTableData = allQuotas.map(({ brand, quota }) => ({
+        'แบรนด์': brand.id,
+        'ชื่อบริษัท/สัญญา': brand.name,
+        'โควต้าออกบูธ (ครั้ง)': `${quota.usedBoothMatches} / ${quota.quotaBoothMatches} (เหลือ ${quota.remainingBoothMatches})`,
+        'สิทธิ์ออกบูธตามลีก': brand.allowedBoothLeagues.join(', '),
+        'โควต้ารับบัตร (ใบ)': `${quota.usedTotalTickets} / ${quota.quotaTotalTickets} (เหลือ ${quota.remainingTotalTickets})`,
+        'โควตารับบัตร (นัด)': `${quota.usedTicketMatches} / ${quota.quotaTicketMatches} นัด`,
+        'สิทธิ์รับบัตรตามลีก': brand.allowedTicketLeagues.join(', '),
+        'สถานะโควต้าบัตร': quota.hasExcessTickets ? `เกินโควต้า +${quota.excessTotalTickets} ใบ` : 'ปกติ'
+      }));
     }
 
     return {
@@ -458,7 +564,7 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
   };
 
   // Handler to open Email Export Modal with dynamic payload for the requested topic
-  const handleOpenEmailExport = (topic: 'overview' | 'proportions' | 'stadiums') => {
+  const handleOpenEmailExport = (topic: 'overview' | 'proportions' | 'stadiums' | 'attendance' | 'quotas') => {
     const data = buildTopicExportData(topic);
     setEmailModalPayload({
       topicId: topic,
@@ -475,7 +581,7 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
   };
 
   // Direct Excel download handler
-  const handleDirectExcelDownload = (topic: 'overview' | 'proportions' | 'stadiums') => {
+  const handleDirectExcelDownload = (topic: 'overview' | 'proportions' | 'stadiums' | 'attendance' | 'quotas') => {
     try {
       const data = buildTopicExportData(topic);
       const wb = XLSX.utils.book_new();
@@ -520,7 +626,7 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
   const renderTopicHeaderBar = (
     title: string,
     subtitle: string,
-    topic: 'overview' | 'proportions' | 'stadiums',
+    topic: 'overview' | 'proportions' | 'stadiums' | 'attendance' | 'quotas',
     countBadge?: string
   ) => {
     const data = buildTopicExportData(topic);
@@ -633,13 +739,13 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
         </div>
 
         {/* Season & View Mode Control Bar */}
-        <div className="mt-6 pt-6 border-t border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          {/* Season Dropdown */}
+        <div className="mt-6 pt-6 border-t border-white/10 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {/* Season Dropdown & League Filter */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-sky-400" />
               <label htmlFor="season-select" className="text-xs font-bold text-slate-200">
-                เลือกฤดูกาลแข่งขัน:
+                เลือกฤดูกาล:
               </label>
             </div>
             <div className="relative">
@@ -647,7 +753,7 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
                 id="season-select"
                 value={selectedSeason}
                 onChange={(e) => handleSeasonChange(e.target.value)}
-                className="bg-slate-800 text-white border border-slate-700 font-semibold text-xs sm:text-sm rounded-xl px-4 py-2.5 pr-9 focus:outline-none focus:ring-2 focus:ring-sky-500 appearance-none cursor-pointer shadow-inner"
+                className="bg-slate-800 text-white border border-slate-700 font-semibold text-xs sm:text-sm rounded-xl px-4 py-2 pr-9 focus:outline-none focus:ring-2 focus:ring-sky-500 appearance-none cursor-pointer shadow-inner"
               >
                 {SUPPORTED_SEASONS.map((season) => (
                   <option key={season.id} value={season.id} className="bg-slate-900 text-white">
@@ -658,6 +764,36 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
               <div className="absolute inset-y-0 right-0 flex items-center px-2.5 pointer-events-none text-slate-400">
                 <ChevronRight className="w-4 h-4 rotate-90" />
               </div>
+            </div>
+
+            {/* League Filter Toggle (Default 'All' ensures all 3 leagues are aggregated) */}
+            <div className="flex items-center gap-1 bg-slate-800/90 p-1 rounded-xl border border-slate-700">
+              <span className="text-[11px] font-semibold text-slate-400 px-2 flex items-center gap-1">
+                <Filter className="w-3 h-3 text-sky-400" />
+                <span>ลีก:</span>
+              </span>
+              {(['All', 'League 1', 'League 2', 'League 3'] as const).map((lg) => {
+                const isSelected = internalLeagueFilter === lg;
+                return (
+                  <button
+                    key={lg}
+                    onClick={() => setInternalLeagueFilter(lg)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      isSelected
+                        ? lg === 'All'
+                          ? 'bg-slate-100 text-slate-900 shadow-sm'
+                          : lg === 'League 1'
+                          ? 'bg-rose-600 text-white shadow-sm'
+                          : lg === 'League 2'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+                    }`}
+                  >
+                    {lg === 'All' ? 'รวมทุกลีก (All)' : lg === 'League 1' ? 'T1 แดง' : lg === 'League 2' ? 'T2 น้ำเงิน' : 'T3 เขียว'}
+                  </button>
+                );
+              })}
             </div>
 
             <span className="text-[11px] px-2.5 py-1 rounded-full bg-sky-500/20 text-sky-300 font-medium border border-sky-400/30">
@@ -725,7 +861,7 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
 
           {/* TOPIC TABS BAR (Season Overview) */}
           <div className="bg-white rounded-3xl p-2 sm:p-2.5 border border-slate-200 shadow-2xs">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-2.5">
               {TOPIC_TABS.map((tab) => {
                 const isSelected = activeTopicTab === tab.id;
                 const Icon = tab.icon;
@@ -890,20 +1026,21 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {SPONSOR_BRANDS.map((brandMeta) => {
-                    const bStat = seasonSummary.brandStats.find(s => s.brand === brandMeta.id);
-                    const booths = bStat?.totalBooths || 0;
-                    const tickets = bStat?.totalTickets || 0;
-                    const approvedBooths = bStat?.approvedBooths || 0;
-                    const approvedTickets = bStat?.approvedTickets || 0;
+                    const bStat = (internalLeagueFilter === 'All' ? seasonSummary : fullSeasonSummary).brandStats.find(s => s.brand === brandMeta.id);
+                    const fullBStat = fullSeasonSummary.brandStats.find(s => s.brand === brandMeta.id);
+                    const booths = (internalLeagueFilter === 'All' ? bStat?.totalBooths : fullBStat?.totalBooths) || 0;
+                    const tickets = (internalLeagueFilter === 'All' ? bStat?.totalTickets : fullBStat?.totalTickets) || 0;
+                    const approvedBooths = (internalLeagueFilter === 'All' ? bStat?.approvedBooths : fullBStat?.approvedBooths) || 0;
+                    const approvedTickets = (internalLeagueFilter === 'All' ? bStat?.approvedTickets : fullBStat?.approvedTickets) || 0;
 
-                    const l1Booths = bStat?.byLeague['League 1'].booths || 0;
-                    const l1Tickets = bStat?.byLeague['League 1'].tickets || 0;
+                    const l1Booths = fullBStat?.byLeague['League 1'].booths || 0;
+                    const l1Tickets = fullBStat?.byLeague['League 1'].tickets || 0;
 
-                    const l2Booths = bStat?.byLeague['League 2'].booths || 0;
-                    const l2Tickets = bStat?.byLeague['League 2'].tickets || 0;
+                    const l2Booths = fullBStat?.byLeague['League 2'].booths || 0;
+                    const l2Tickets = fullBStat?.byLeague['League 2'].tickets || 0;
 
-                    const l3Booths = bStat?.byLeague['League 3'].booths || 0;
-                    const l3Tickets = bStat?.byLeague['League 3'].tickets || 0;
+                    const l3Booths = fullBStat?.byLeague['League 3'].booths || 0;
+                    const l3Tickets = fullBStat?.byLeague['League 3'].tickets || 0;
 
                     return (
                       <tr key={brandMeta.id} className="hover:bg-slate-50/70 transition-colors">
@@ -994,6 +1131,73 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
               </table>
             </div>
           </div>
+
+              {/* Highlight Showcase Cards for Attendance Top 10 & Brand Quotas (User Requirement 4) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Showcase 1: อันดับผู้ชม 10 สนาม */}
+                <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-indigo-950 text-white rounded-3xl p-6 border border-slate-800 shadow-sm flex flex-col justify-between gap-4">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        <Flame className="w-3.5 h-3.5 text-amber-400" />
+                        <span>สถิติยอดผู้ชมสูงสุด</span>
+                      </span>
+                      <span className="text-[11px] text-slate-400">10 อันดับแรก</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-white mt-3">
+                      ตารางจัดอันดับ 10 สนามที่มีผู้เข้าชมมากที่สุด
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      ดูแมตช์ที่มียอดคนดูเยอะที่สุด จัดอันดับทั้งแบบรวมทุกลีก (League 1-3) และแยกลีก พร้อมอัตราส่วนเข้าชมเทียบความจุสนาม
+                    </p>
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-between border-t border-white/10">
+                    <span className="text-xs text-slate-300">
+                      รวมสถิติจากทุกสนามเหย้า
+                    </span>
+                    <button
+                      onClick={() => setActiveTopicTab('attendance')}
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>เปิดดูตารางจัดอันดับ 10 สนาม</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Showcase 2: โควต้า & สิทธิ์แต่ละแบรนด์ */}
+                <div className="bg-gradient-to-br from-slate-900 via-slate-850 to-blue-950 text-white rounded-3xl p-6 border border-slate-800 shadow-sm flex flex-col justify-between gap-4">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                        <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
+                        <span>ย้ายมาจากแดชบอร์ด</span>
+                      </span>
+                      <span className="text-[11px] text-slate-400">{SPONSOR_BRANDS.length} แบรนด์</span>
+                    </div>
+                    <h3 className="text-lg font-bold text-white mt-3">
+                      สรุปโควต้ารับบัตร & สิทธิ์ออกบูธแต่ละแบรนด์
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      ตรวจสอบโควตาคงเหลือ สิทธิ์ที่ได้รับตามสัญญา (BYD, Chang, Toyota, WHA ฯลฯ) และเพดานบัตรต่อแมตช์อย่างโปร่งใส
+                    </p>
+                  </div>
+
+                  <div className="pt-2 flex items-center justify-between border-t border-white/10">
+                    <span className="text-xs text-slate-300">
+                      คำนวณตามสัญญาฤดูกาล {selectedSeason}
+                    </span>
+                    <button
+                      onClick={() => setActiveTopicTab('quotas')}
+                      className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>เปิดดูสรุปโควต้า & สิทธิ์แบรนด์</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
 
               {/* Season Monthly Progression / Calendar */}
               <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-2xs space-y-4">
@@ -1112,7 +1316,40 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
             </div>
           )}
 
-          {/* TAB 3: สถิติสนามยอดนิยม (Season Stadiums) */}
+          {/* TAB 3: อันดับยอดผู้ชม 10 สนาม (Attendance Top 10) */}
+          {activeTopicTab === 'attendance' && (
+            <div className="space-y-6">
+              {renderTopicHeaderBar(
+                `ตารางจัดอันดับ 10 สนามที่มีผู้เข้าชมแมตช์การแข่งขันมากที่สุด (${selectedSeason})`,
+                `แสดงสถิติยอดผู้ชมสูงสุด 10 อันดับแรก มีให้เลือกทั้งแบบจัดอันดับรวมทุกลีก (League 1-3) และแยกลีกรายลีก พร้อมอัตราส่วนเข้าชมเทียบความจุสนาม`,
+                'attendance'
+              )}
+
+              <AttendanceTopTenSection
+                initialLeagueFilter={internalLeagueFilter}
+                showTitle={false}
+              />
+            </div>
+          )}
+
+          {/* TAB 4: สรุปโควต้ารับบัตร & สิทธิ์แต่ละแบรนด์ (Brand Quotas & Rights) */}
+          {activeTopicTab === 'quotas' && (
+            <div className="space-y-6">
+              {renderTopicHeaderBar(
+                `สรุปโควต้ารับบัตร & สิทธิ์ออกบูธของแต่ละแบรนด์ (ทั้งฤดูกาล ${selectedSeason})`,
+                `ย้ายจากหน้าแดชบอร์ด: รายงานโควตาสิทธิประโยชน์ประจำสัญญาของแต่ละแบรนด์ (ออกบูธ/รับบัตร/เพดานต่อแมตช์) ตรวจสอบโควตาคงเหลือและการขอเกิน`,
+                'quotas'
+              )}
+
+              <BrandQuotasPrivilegesSection
+                records={accessibleRecords}
+                selectedSeason={selectedSeason}
+                currentUser={currentUser}
+              />
+            </div>
+          )}
+
+          {/* TAB 5: สถิติสนามยอดนิยม (Season Stadiums) */}
           {activeTopicTab === 'stadiums' && (
             <div className="space-y-6">
               {renderTopicHeaderBar(
@@ -1212,7 +1449,7 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
 
           {/* TOPIC TABS BAR (Monthly Detail) */}
           <div className="bg-white rounded-3xl p-2 sm:p-2.5 border border-slate-200 shadow-2xs">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-2.5">
               {TOPIC_TABS.map((tab) => {
                 const isSelected = activeTopicTab === tab.id;
                 const Icon = tab.icon;
@@ -1434,7 +1671,40 @@ export const MonthlyDashboard: React.FC<MonthlyDashboardProps> = ({
             </div>
           )}
 
-          {/* TAB 3: สถิติสนามยอดนิยม (Stadiums) */}
+          {/* TAB 3: อันดับยอดผู้ชม 10 สนาม (Attendance Top 10) */}
+          {activeTopicTab === 'attendance' && (
+            <div className="space-y-6">
+              {renderTopicHeaderBar(
+                `ตารางจัดอันดับ 10 สนามที่มีผู้เข้าชมแมตช์การแข่งขันมากที่สุด (${activeMonthInfo.shortThai})`,
+                `แสดงสถิติยอดผู้ชมสูงสุด 10 อันดับแรก มีให้เลือกทั้งแบบจัดอันดับรวมทุกลีก (League 1-3) และแยกลีกรายลีก พร้อมอัตราส่วนเข้าชมเทียบความจุสนาม`,
+                'attendance'
+              )}
+
+              <AttendanceTopTenSection
+                initialLeagueFilter={internalLeagueFilter}
+                showTitle={false}
+              />
+            </div>
+          )}
+
+          {/* TAB 4: สรุปโควต้ารับบัตร & สิทธิ์แต่ละแบรนด์ (Brand Quotas & Rights) */}
+          {activeTopicTab === 'quotas' && (
+            <div className="space-y-6">
+              {renderTopicHeaderBar(
+                `สรุปโควต้ารับบัตร & สิทธิ์ออกบูธของแต่ละแบรนด์ (ฤดูกาล ${selectedSeason})`,
+                `ย้ายจากหน้าแดชบอร์ด: รายงานโควตาสิทธิประโยชน์ประจำสัญญาของแต่ละแบรนด์ (ออกบูธ/รับบัตร/เพดานต่อแมตช์) ตรวจสอบโควตาคงเหลือและการขอเกิน`,
+                'quotas'
+              )}
+
+              <BrandQuotasPrivilegesSection
+                records={accessibleRecords}
+                selectedSeason={selectedSeason}
+                currentUser={currentUser}
+              />
+            </div>
+          )}
+
+          {/* TAB 5: สถิติสนามยอดนิยม (Stadiums) */}
           {activeTopicTab === 'stadiums' && (
             <div className="space-y-6">
               {renderTopicHeaderBar(

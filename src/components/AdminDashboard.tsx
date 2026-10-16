@@ -51,6 +51,7 @@ interface AdminDashboardProps {
   currentUser?: UserProfile | null;
   onOpenSheetsModal: () => void;
   onNavigateToContacts?: () => void;
+  onNavigateToMonthly?: () => void;
   onResetData?: () => void;
 }
 
@@ -59,6 +60,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentUser,
   onOpenSheetsModal,
   onNavigateToContacts,
+  onNavigateToMonthly,
   onResetData,
 }) => {
   const [adminSection, setAdminSection] = useState<'registrations' | 'brands' | 'users' | 'crests'>('registrations');
@@ -713,135 +715,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* Brand Rights & Season Quota Card (Admin Back-Office Dashboard) */}
-      {activeFilteredBrandItem && activeFilteredBrandQuota && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 text-white border border-slate-700 shadow-sm space-y-3 animate-fadeIn">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <span 
-                className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs text-white shadow-xs"
-                style={{ backgroundColor: activeFilteredBrandItem.color }}
-              >
-                {activeFilteredBrandItem.logoText.slice(0, 3)}
-              </span>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs sm:text-sm">{activeFilteredBrandItem.name}</span>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white/10 text-slate-200">
-                    ฤดูกาล {activeSeason}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-300">
-                  สิทธิประโยชน์และโควต้าที่ได้รับตามสัญญา (ระบบหลังบ้านแอดมิน)
-                </p>
+      {/* Brand Rights & Quota Notice (Moved to Monthly Dashboard per user request) */}
+      {filterBrand !== 'All' && onNavigateToMonthly && (
+        <div className="p-3.5 rounded-2xl bg-slate-900 text-white border border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-blue-500/20 text-blue-400">
+              <Shield className="w-4 h-4" />
+            </span>
+            <div>
+              <div className="text-xs font-bold text-white">
+                สรุปโควต้ารับบัตร & สิทธิ์ออกบูธของแบรนด์ {filterBrand}
               </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`text-[11px] font-bold px-3 py-1 rounded-full flex items-center gap-1.5 ${
-                activeFilteredBrandQuota.remainingBoothMatches === 0
-                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                  : activeFilteredBrandQuota.remainingBoothMatches <= 2
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                    : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
-              }`}>
-                <span>ออกบูธเหลือ:</span>
-                <strong className="underline underline-offset-2">{activeFilteredBrandQuota.remainingBoothMatches} ครั้ง</strong>
-              </span>
-
-              <span className={`text-[11px] font-bold px-3 py-1 rounded-full flex items-center gap-1.5 ${
-                activeFilteredBrandQuota.remainingTicketMatches === 0
-                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                  : activeFilteredBrandQuota.remainingTicketMatches <= 3
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-              }`}>
-                <span>รับบัตรเหลือ:</span>
-                <strong className="underline underline-offset-2">{activeFilteredBrandQuota.remainingTicketMatches} ครั้ง</strong>
-              </span>
+              <div className="text-[11px] text-slate-400">
+                ย้ายไปแสดงผลในหน้า <strong>"สรุปยอดแยกรายเดือน"</strong> เพื่อการวิเคราะห์และสรุปผลที่ครบถ้วนทุก League
+              </div>
             </div>
           </div>
-
-          {/* Quota Progress Bars */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Booth Quota Bar */}
-            <div className="space-y-1.5 bg-white/5 p-3 rounded-xl border border-white/10">
-              <div className="flex items-center justify-between text-xs font-semibold">
-                <span className="text-slate-300 flex items-center gap-1.5">
-                  <Store className="w-3.5 h-3.5 text-blue-400" />
-                  <span>ขอออกบูธไปแล้ว:</span>
-                  <strong className="text-white">{activeFilteredBrandQuota.usedBoothMatches} / {activeFilteredBrandQuota.quotaBoothMatches} ครั้ง</strong>
-                </span>
-                <span className="text-slate-400 text-[10px]">
-                  {activeFilteredBrandItem.allowedBoothLeagues.length < 3 
-                    ? `(${activeFilteredBrandItem.allowedBoothLeagues.map(l => l === 'League 1' ? 'T1' : l === 'League 2' ? 'T2' : 'T3').join('+')} รวมกัน)` 
-                    : 'ทุกรายการ'}
-                </span>
-              </div>
-              <div className="w-full h-2 rounded-full bg-slate-700/80 overflow-hidden">
-                <div 
-                  className={`h-full transition-all rounded-full ${
-                    activeFilteredBrandQuota.isBoothLimitReached ? 'bg-rose-500' : activeFilteredBrandQuota.isBoothNearLimit ? 'bg-amber-400' : 'bg-blue-400'
-                  }`}
-                  style={{ width: `${activeFilteredBrandQuota.boothUsagePercent}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Ticket Quota Bar */}
-            <div className="space-y-2 bg-white/5 p-3 rounded-xl border border-white/10">
-              <div className="flex flex-wrap items-center justify-between text-xs font-semibold gap-1">
-                <span className="text-slate-300 flex items-center gap-1.5">
-                  <Ticket className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>ขอรับบัตรไปแล้ว:</span>
-                  <strong className="text-white">{activeFilteredBrandQuota.usedTotalTickets} / {activeFilteredBrandQuota.quotaTotalTickets} ใบ</strong>
-                  <span className="text-slate-400 text-[11px]">({activeFilteredBrandQuota.usedTicketMatches}/{activeFilteredBrandQuota.quotaTicketMatches} นัด)</span>
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {activeFilteredBrandQuota.hasExcessTickets ? (
-                    <span className="px-2 py-0.5 rounded-md bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[10px] font-bold flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3 text-rose-400" />
-                      <span>เกินโควต้า +{activeFilteredBrandQuota.excessTotalTickets} ใบ</span>
-                    </span>
-                  ) : (
-                    <span className="text-emerald-400 text-[10px]">
-                      เหลือ {activeFilteredBrandQuota.remainingTotalTickets} ใบ
-                    </span>
-                  )}
-                  <span className="text-slate-400 text-[10px]">
-                    • เพดาน: {formatMaxTicketsPerMatch(activeFilteredBrandItem)}
-                  </span>
-                </div>
-              </div>
-              <div className="w-full h-2 rounded-full bg-slate-700/80 overflow-hidden">
-                <div 
-                  className={`h-full transition-all rounded-full ${
-                    activeFilteredBrandQuota.hasExcessTickets
-                      ? 'bg-rose-500' 
-                      : activeFilteredBrandQuota.usedTotalTickets >= activeFilteredBrandQuota.quotaTotalTickets * 0.8
-                        ? 'bg-amber-400' 
-                        : 'bg-emerald-400'
-                  }`}
-                  style={{ width: `${Math.min(100, activeFilteredBrandQuota.totalTicketsUsagePercent)}%` }}
-                />
-              </div>
-              {activeFilteredBrandQuota.hasExcessTickets && (
-                <div className="text-[11px] text-rose-300 bg-rose-500/15 px-2.5 py-1.5 rounded-lg border border-rose-500/20 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  <span>แบรนด์นี้ขอรับบัตรเกินโควต้าประจำฤดูกาลแล้ว <strong>+{activeFilteredBrandQuota.excessTotalTickets} ใบ</strong> (มีค่าใช้จ่ายซื้อบัตรเพิ่มจากสโมสร)</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* League Permissions Info */}
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs pt-1">
-            <div className="flex flex-wrap items-center gap-3 text-slate-300 text-[11px]">
-              <span>🏢 สิทธิ์ออกบูธ: <strong className="text-white">{activeFilteredBrandItem.allowedBoothLeagues.map(l => l === 'League 1' ? 'Thai League 1' : l === 'League 2' ? 'Thai League 2' : 'Thai League 3').join(', ') || 'ไม่มีสิทธิ์'}</strong></span>
-              <span>•</span>
-              <span>🎟️ สิทธิ์รับบัตร: <strong className="text-white">{activeFilteredBrandItem.allowedTicketLeagues.map(l => l === 'League 1' ? 'Thai League 1' : l === 'League 2' ? 'Thai League 2' : 'Thai League 3').join(', ') || 'ไม่มีสิทธิ์'}</strong></span>
-            </div>
-          </div>
+          <button
+            onClick={onNavigateToMonthly}
+            className="self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>ดูโควต้า & สิทธิ์ในหน้าสรุปยอด</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 

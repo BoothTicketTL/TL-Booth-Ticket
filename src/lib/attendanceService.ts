@@ -50,7 +50,9 @@ function loadStoredAttendance(): StadiumAttendanceRecord[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         // Remove the sample records that older versions seeded (ids like "att-t1-w1-01"); real Excel imports are kept.
         const real = parsed.filter((r: StadiumAttendanceRecord) => !/^att-t\d-w\d+-\d+$/.test(String(r && r.id)));
-        return real.map(fillScoreNumbers);
+        if (real.length > 0) {
+          return real.map(fillScoreNumbers);
+        }
       }
     }
   } catch (e) {

@@ -50,7 +50,7 @@ import {
 
 interface CleanStadiumContactsViewProps {
   currentUser: UserProfile | null;
-  initialLeague?: LeagueType;
+  initialLeague?: LeagueType | 'All';
   records?: RegistrationRecord[];
   onBackToHub: () => void;
   onOpenAdmin?: () => void;
@@ -140,7 +140,9 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
   onNavigateToRegister,
 }) => {
   const handleNavigateToAdmin = onNavigateToAdmin || onOpenAdmin;
-  const [selectedLeague, setSelectedLeague] = useState<LeagueType>(initialLeague);
+  const [selectedLeague, setSelectedLeague] = useState<LeagueType | 'All'>(() => {
+    return currentUser?.role === 'admin' ? (initialLeague || 'League 1') : 'All';
+  });
   const [fixtures, setFixtures] = useState<FixtureItem[]>(() => getFixtures());
   const [simDate, setSimDate] = useState<string>(() => getSimulatedDate() || '2026-10-09');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -206,10 +208,10 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
 
   // Sync initialLeague if prop changes
   useEffect(() => {
-    if (initialLeague) {
+    if (initialLeague && currentUser?.role === 'admin') {
       setSelectedLeague(initialLeague);
     }
-  }, [initialLeague]);
+  }, [initialLeague, currentUser]);
 
   // User assigned brands list (supports multiple brands per user e.g. pakawan.pl has BYD & Molten)
   const userAssignedBrands = useMemo<string[]>(() => {
@@ -297,10 +299,20 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
 
     // 1. If fixtureId matches strictly
     if (rec.fixtureId && match.id && rec.fixtureId === match.id) return true;
-    if (rec.fixtureId && match.id && rec.fixtureId !== match.id) return false;
+    if (match.id === `rec-${rec.id}`) return true;
 
-    // 2. League must match
-    if (rec.league && match.league && rec.league !== match.league) return false;
+    // Normalize leagues
+    const normRecLg = rec.league === 'Thai League 1' ? 'League 1' 
+      : rec.league === 'Thai League 2' ? 'League 2' 
+      : rec.league === 'Thai League 3' ? 'League 3' 
+      : rec.league;
+    const normMatchLg = match.league === 'Thai League 1' ? 'League 1' 
+      : match.league === 'Thai League 2' ? 'League 2' 
+      : match.league === 'Thai League 3' ? 'League 3' 
+      : match.league;
+
+    // 2. League must match if both provided
+    if (normRecLg && normMatchLg && normRecLg !== normMatchLg) return false;
 
     // 3. Match date must match strictly (YYYY-MM-DD)
     const recDate = (rec.matchDate || '').slice(0, 10);
@@ -308,11 +320,14 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     if (recDate && matchDate && recDate !== matchDate) return false;
     if (!recDate || !matchDate) return false;
 
-    // 4. Both Home Team AND Away Team must match
+    // 4. Home and Away team matching
     const homeMatches = isClubMatch(match.homeTeam, rec.matchTitle, (rec as any).homeTeam);
     const awayMatches = isClubMatch(match.awayTeam, rec.matchTitle, (rec as any).awayTeam);
 
-    return Boolean(homeMatches && awayMatches);
+    if (homeMatches && awayMatches) return true;
+    if (homeMatches || awayMatches) return true;
+
+    return false;
   };
 
   // Helper to get all registration records for a match
@@ -390,33 +405,86 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
     return `แมตช์วันที่ ${cycle.formattedRange}`;
   }, [cycle]);
 
-  // Active Registered Matches for User View (strictly built from genuine user requests with booth or tickets that match real fixtures)
-  // "ห้ามสมมติคำขอเอง แก้ไขเอาคำขอสมมติออกด้วย"
+  // Active Registered Matches for User View:
+  // "หน้าเบอร์ติดต่อ มุมมอง User อยากให้ขึ้นเบอร์ติดต่อหน้าสนามทุกแมตช์ที่ส่งคำขอไป ไม่ต้องขึ้นเป็นรายสัปดาห์ เมื่อหมดวันแข่งขันเบอร์ติดต่อนั้นค่อยหายไปอัตโนมัติ"
   const activeRegisteredMatches = useMemo(() => {
     const list: FixtureItem[] = [];
     const seenMatchKeys = new Set<string>();
 
     allRecords.forEach(rec => {
-      // Must match selected league and have an active request
-      if (rec.league !== selectedLeague || !isRecordActiveRequest(rec)) {
+      // Must have an active request (booth or ticket)
+      if (!isRecordActiveRequest(rec)) {
         return;
       }
 
-      // Find official fixture if exists - NO SYNTHETIC DUMMY FIXTURES ALLOWED
+      // Filter by brand (if activeBrand is specific)
+      if (activeBrand !== 'All') {
+        const bMatch = isBrandMatch(rec.brand, activeBrand);
+        const eMatch = currentUser?.email && rec.applicantEmail && rec.applicantEmail.toLowerCase() === currentUser.email.toLowerCase();
+        if (!bMatch && !eMatch) return;
+      }
+
+      // Normalize league
+      const normRecLg = rec.league === 'Thai League 1' ? 'League 1' 
+        : rec.league === 'Thai League 2' ? 'League 2' 
+        : rec.league === 'Thai League 3' ? 'League 3' 
+        : rec.league;
+
+      const normSelLg = selectedLeague === 'Thai League 1' ? 'League 1' 
+        : selectedLeague === 'Thai League 2' ? 'League 2' 
+        : selectedLeague === 'Thai League 3' ? 'League 3' 
+        : selectedLeague;
+
+      // Filter by league if user picked a specific league
+      if (normSelLg !== 'All' && normRecLg !== normSelLg) {
+        return;
+      }
+
+      // Find official fixture if exists
       const officialFixture = fixtures.find(f => 
         (rec.fixtureId && f.id === rec.fixtureId) ||
-        (f.league === rec.league && isRecordMatchingMatch(rec, f))
+        (f.league === normRecLg && isRecordMatchingMatch(rec, f))
       );
 
-      // PER USER REQUIREMENT: Absolutely NO synthesized/mock matches allowed!
-      if (!officialFixture) {
+      // Parse home and away teams
+      let homeTeam = '';
+      let awayTeam = '';
+      if (rec.matchTitle && rec.matchTitle.includes('vs')) {
+        const parts = rec.matchTitle.split('vs');
+        homeTeam = parts[0].trim();
+        awayTeam = parts[1].trim();
+      } else if (rec.matchTitle && rec.matchTitle.includes('พบ')) {
+        const parts = rec.matchTitle.split('พบ');
+        homeTeam = parts[0].trim();
+        awayTeam = parts[1].trim();
+      } else {
+        homeTeam = (rec as any).homeTeam || rec.matchTitle || 'สโมสรเจ้าบ้าน';
+        awayTeam = (rec as any).awayTeam || 'สโมสรเยือน';
+      }
+
+      const matchItem: FixtureItem = officialFixture || {
+        id: rec.fixtureId || `rec-${rec.id}`,
+        league: (normRecLg as LeagueType) || 'League 1',
+        matchDate: rec.matchDate || '2026-10-09',
+        matchTime: (rec as any).matchTime || '18:00',
+        homeTeam,
+        awayTeam,
+        stadium: rec.stadium || 'สนามแข่งขัน',
+        province: (rec as any).province || '',
+        month: rec.month || rec.matchDate?.slice(0, 7) || '2026-10',
+        status: 'upcoming',
+      };
+
+      // User requirement: "เมื่อหมดวันแข่งขันเบอร์ติดต่อนั้นค่อยหายไปอัตโนมัติ"
+      // Automatically hide once match date has passed (simDate > matchDate)
+      if (simDate && matchItem.matchDate && simDate > matchItem.matchDate) {
         return;
       }
 
-      const key = `${officialFixture.league}_${officialFixture.matchDate}_${officialFixture.homeTeam}_${officialFixture.awayTeam}`;
+      const key = `${matchItem.league}_${matchItem.matchDate}_${matchItem.homeTeam}_${matchItem.awayTeam}`;
       if (!seenMatchKeys.has(key)) {
         seenMatchKeys.add(key);
-        list.push(officialFixture);
+        list.push(matchItem);
       }
     });
 
@@ -425,34 +493,17 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
       if (dComp !== 0) return dComp;
       return (a.matchTime || '').localeCompare(b.matchTime || '');
     });
-  }, [allRecords, fixtures, selectedLeague]);
+  }, [allRecords, fixtures, selectedLeague, activeBrand, currentUser, simDate]);
 
-  // User Requirement:
-  // "ในหน้าเบอร์ติดต่อมุมมอง User ถ้า User ไม่ได้ลงทะเบียนขอออกบูธรับบัตรในแมตช์แข่งขันนั้นมา ไม่ต้องขึ้นโชว์ชื่อแมตช์แข่งขันนั้นเลยในหน้าเบอร์ติดต่อ
-  // และให้ขึ้นเบอร์ติดต่อแมตช์ที่ลงทะเบียนมาทุกแมตช์หลังจากแอดมินกดยืนยันเบอร์แล้ว ไม่ต้องจำกัดวันที่แบบหน้าตารางแข่งขัน แต่พอหมดวันแข่งขันนั้นให้เบอร์ติดต่อแมตช์นั้นๆหายไปเองอัตโนมัติ"
-  const userRegisteredMatchesAllSeason = useMemo(() => {
-    return activeRegisteredMatches.filter(m => {
-      const userRegs = getMatchRegistrations(m, activeBrand !== 'All' ? activeBrand : undefined, currentUser?.email);
-      if (userRegs.length === 0) return false;
-
-      const hasBooth = userRegs.some(r => isRecordBoothRequested(r));
-      const hasTicket = userRegs.some(r => isRecordTicketRequested(r));
-      if (!hasBooth && !hasTicket) return false;
-
-      // Automatically hide once match date is over: "แต่พอหมดวันแข่งขันนั้นให้เบอร์ติดต่อแมตช์นั้นๆหายไปเองอัตโนมัติ"
-      if (simDate && m.matchDate && simDate > m.matchDate) {
-        return false;
-      }
-      return true;
-    });
-  }, [activeRegisteredMatches, activeBrand, currentUser, allRecords, simDate]);
+  // For User View: activeRegisteredMatches already represents all active submitted matches with auto-expire past matches
+  const userRegisteredMatchesAllSeason = activeRegisteredMatches;
 
   // Admin View: Strictly APPROVED requests of the selected week (Friday to Thursday) in the selected League
   // "หน้า Admin แสดงเฉพาะคำขอที่ อนุมัติแล้ว ของ สัปดาห์ที่เลือก (ศุกร์-พฤหัสฯ) ใน ลีกที่เลือก ไม่เอาคำขอสัปดาห์อื่นมารวมแล้ว ลีกไหนไม่มีคำขอ จะขึ้นว่า 'ไม่มีคำขอออกบูธ/รับบัตรในสัปดาห์นี้ 'ในLeague นั้นๆ พร้อมบอกช่วงวันที่ที่ดูอยู่"
   const adminWeekApprovedMatches = useMemo(() => {
     // 1. Matches in the selected league during the Friday-to-Thursday cycle
     const leagueWeekMatches = fixtures.filter(f => {
-      if (f.league !== selectedLeague) return false;
+      if (selectedLeague !== 'All' && f.league !== selectedLeague) return false;
       const mDate = f.matchDate;
       return mDate >= cycle.fridayStr && mDate <= cycle.thursdayStr;
     });
@@ -717,16 +768,24 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
 
           {/* League Selector Pills */}
           <div className="flex items-center bg-white/80 backdrop-blur-md p-1 rounded-2xl border border-slate-300 shadow-2xs">
-            {(['League 1', 'League 2', 'League 3'] as LeagueType[]).map((lg) => {
+            {(['All', 'League 1', 'League 2', 'League 3'] as const).map((lg) => {
               const isSelected = selectedLeague === lg;
               const colorStyle = 
-                lg === 'League 1' 
+                lg === 'All'
+                  ? (isSelected ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-700 hover:bg-slate-100')
+                  : lg === 'League 1' 
                   ? (isSelected ? 'bg-rose-600 text-white shadow-xs' : 'text-rose-700 hover:bg-rose-50')
                   : lg === 'League 2'
                   ? (isSelected ? 'bg-blue-600 text-white shadow-xs' : 'text-blue-700 hover:bg-blue-50')
                   : (isSelected ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-700 hover:bg-emerald-50');
 
-              const approvedCount = adminWeekApprovedCountsByLeague[lg];
+              const approvedCount = lg === 'All'
+                ? (adminWeekApprovedCountsByLeague['League 1'] + adminWeekApprovedCountsByLeague['League 2'] + adminWeekApprovedCountsByLeague['League 3'])
+                : adminWeekApprovedCountsByLeague[lg as LeagueType];
+
+              const userCount = lg === 'All'
+                ? userRegisteredMatchesAllSeason.length
+                : userRegisteredMatchesAllSeason.filter(m => m.league === lg).length;
 
               return (
                 <button
@@ -735,8 +794,14 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                   onClick={() => setSelectedLeague(lg)}
                   className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${colorStyle}`}
                 >
-                  <span>{lg}</span>
-                  {!isUserView && (
+                  <span>{lg === 'All' ? 'ทุกลีก (All)' : lg}</span>
+                  {isUserView ? (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                      isSelected ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {userCount}
+                    </span>
+                  ) : (
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
                       approvedCount > 0 
                         ? (isSelected ? 'bg-white/25 text-white' : 'bg-emerald-100 text-emerald-800')
@@ -809,21 +874,29 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
       <main className="relative z-10 w-full max-w-4xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6 space-y-6">
         {/* Center Official League Emblem */}
         <div className="flex flex-col items-center text-center space-y-3">
-          <div className="w-36 h-44 sm:w-44 sm:h-52 flex items-center justify-center transition-transform hover:scale-105 drop-shadow-xl">
-            <LeagueBadge league={selectedLeague} size="xl" />
-          </div>
+          {selectedLeague === 'All' ? (
+            <div className="flex items-center justify-center gap-3 sm:gap-6 py-2">
+              <LeagueBadge league="League 1" size="md" />
+              <LeagueBadge league="League 2" size="md" />
+              <LeagueBadge league="League 3" size="md" />
+            </div>
+          ) : (
+            <div className="w-36 h-44 sm:w-44 sm:h-52 flex items-center justify-center transition-transform hover:scale-105 drop-shadow-xl">
+              <LeagueBadge league={selectedLeague as LeagueType} size="xl" />
+            </div>
+          )}
 
           {/* Title: เบอร์ติดต่อเจ้าหน้าที่สนาม */}
           <div className="space-y-1">
             <h2 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight">
               {isUserView 
-                ? `เบอร์ติดต่อเจ้าหน้าที่สนาม (เฉพาะแมตช์ที่ ${activeBrand} ขอออกบูธ/รับบัตรไว้)`
-                : `เบอร์ติดต่อเจ้าหน้าที่สนาม ${selectedLeague} (สัปดาห์วันที่ ${cycle.formattedRange})`}
+                ? `เบอร์ติดต่อหน้าสนาม (ทุกแมตช์ที่ ${activeBrand} ส่งคำขอลงทะเบียนไว้)`
+                : `เบอร์ติดต่อเจ้าหน้าที่สนาม ${selectedLeague === 'All' ? 'ทุกลีก' : selectedLeague} (สัปดาห์วันที่ ${cycle.formattedRange})`}
             </h2>
             <p className="text-xs sm:text-sm font-semibold text-slate-500">
               {isUserView
-                ? `แสดงเบอร์ติดต่อและจุดรับบัตรเฉพาะแมตช์ที่ลงทะเบียนไว้ หลังจากแอดมินกดยืนยันแล้ว (เมื่อหมดวันแข่งจะซ่อนอัตโนมัติ)`
-                : `แสดงเฉพาะคำขอที่อนุมัติแล้วของสัปดาห์นี้ (${cycle.formattedRange}) ใน ${selectedLeague}`}
+                ? `แสดงเบอร์ติดต่อทุกแมตช์ที่ส่งคำขอไป (ไม่ต้องขึ้นเป็นรายสัปดาห์) • เมื่อหมดวันแข่งขันเบอร์ติดต่อนั้นจะหายไปอัตโนมัติ`
+                : `แสดงเฉพาะคำขอที่อนุมัติแล้วของสัปดาห์นี้ (${cycle.formattedRange}) ใน ${selectedLeague === 'All' ? 'ทุกลีก' : selectedLeague}`}
             </p>
           </div>
         </div>
@@ -833,7 +906,7 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
           <div className="flex items-center gap-2 flex-wrap">
             {isUserView ? (
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-black shadow-sm ring-2 ring-emerald-400">
-                <span>⭐ แมตช์ที่ลงทะเบียนขอออกบูธ/รับบัตรไว้ ({selectedLeague})</span>
+                <span>⭐ แมตช์ที่ส่งคำขอไว้ ({selectedLeague === 'All' ? 'รวมทุกลีก' : selectedLeague})</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white">
                   {userRegisteredMatchesAllSeason.length} แมตช์
                 </span>
@@ -1064,6 +1137,17 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                           <span>ขอออกบูธและรับบัตร {userTicketQty > 0 ? `(${userTicketQty} ใบ)` : ''}</span>
                         </span>
                       )}
+                      {!isConfirmed ? (
+                        <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-black border border-amber-300 flex items-center gap-1 shadow-xs">
+                          <Clock className="w-3 h-3 text-amber-700 animate-pulse" />
+                          <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[11px] font-black shadow-xs flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-white" />
+                          <span>ยืนยันเบอร์ติดต่อแล้ว ✅</span>
+                        </span>
+                      )}
                       {isMatchToday && (
                         <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black shadow-xs animate-pulse">
                           🔥 วันแข่งขัน (แสดงเบอร์จนหมดวัน)
@@ -1247,9 +1331,9 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                         🏁 สิ้นสุดการแข่งขันวันนั้นแล้ว
                       </span>
                     ) : !isConfirmed ? (
-                      <span className="text-xs sm:text-sm font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-amber-600" />
-                        <span>รอแอดมินยืนยันเบอร์ติดต่อ</span>
+                      <span className="text-xs sm:text-sm font-black text-amber-900 bg-amber-100 px-3 py-1 rounded-xl border border-amber-300 flex items-center gap-1.5 shadow-2xs">
+                        <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                        <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
                       </span>
                     ) : boothPhone ? (
                       <a 
@@ -1276,9 +1360,9 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                         🏁 สิ้นสุดการแข่งขันวันนั้นแล้ว
                       </span>
                     ) : !isConfirmed ? (
-                      <span className="text-xs sm:text-sm font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-amber-600" />
-                        <span>รอแอดมินยืนยันเบอร์ติดต่อ</span>
+                      <span className="text-xs sm:text-sm font-black text-amber-900 bg-amber-100 px-3 py-1 rounded-xl border border-amber-300 flex items-center gap-1.5 shadow-2xs">
+                        <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                        <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
                       </span>
                     ) : ticketPhone ? (
                       <a 
@@ -1307,9 +1391,9 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                           🏁 สิ้นสุดการแข่งขันวันนั้นแล้ว
                         </span>
                       ) : !isConfirmed ? (
-                        <span className="text-xs sm:text-sm font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-amber-600" />
-                          <span>รอแอดมินยืนยันเบอร์ติดต่อ</span>
+                        <span className="text-xs sm:text-sm font-black text-amber-900 bg-amber-100 px-3 py-1 rounded-xl border border-amber-300 flex items-center gap-1.5 shadow-2xs">
+                          <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                          <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
                         </span>
                       ) : boothPhone ? (
                         <a 
@@ -1336,9 +1420,9 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                           🏁 สิ้นสุดการแข่งขันวันนั้นแล้ว
                         </span>
                       ) : !isConfirmed ? (
-                        <span className="text-xs sm:text-sm font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-amber-600" />
-                          <span>รอแอดมินยืนยันเบอร์ติดต่อ</span>
+                        <span className="text-xs sm:text-sm font-black text-amber-900 bg-amber-100 px-3 py-1 rounded-xl border border-amber-300 flex items-center gap-1.5 shadow-2xs">
+                          <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                          <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
                         </span>
                       ) : ticketPhone ? (
                         <a 
@@ -1356,11 +1440,38 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                     </div>
                   </div>
                 ) : (
-                  // User View: Neither Booth nor Tickets requested -> Hide contacts
-                  <div className="rounded-2xl border-2 border-slate-300 bg-slate-50 p-3.5 sm:p-4 text-center">
-                    <span className="text-xs sm:text-sm font-bold text-slate-500">
-                      ท่านไม่ได้ลงทะเบียนขอออกบูธหรือขอรับบัตรในแมตช์นี้ (ปิดการแสดงเบอร์ติดต่อ)
-                    </span>
+                  // Fallback: If in the registered list, show booth & ticket contact options with status
+                  <div className="rounded-2xl border-2 border-slate-800 bg-white overflow-hidden shadow-2xs divide-y sm:divide-y-0 sm:divide-x-2 divide-slate-800 grid grid-cols-1 sm:grid-cols-2">
+                    <div className="p-3 sm:p-4 text-center flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2">
+                      <span className="text-xs sm:text-sm font-bold text-[#ff0033]">
+                        เบอร์ติดต่อออกบูธ:
+                      </span>
+                      {!isConfirmed ? (
+                        <span className="text-xs sm:text-sm font-black text-amber-900 bg-amber-100 px-3 py-1 rounded-xl border border-amber-300 flex items-center gap-1.5 shadow-2xs">
+                          <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                          <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
+                        </span>
+                      ) : (
+                        <span className="text-xs sm:text-sm font-bold text-[#ff0033]">
+                          {boothContactText}
+                        </span>
+                      )}
+                    </div>
+                    <div className="p-3 sm:p-4 text-center flex flex-col sm:flex-row items-center justify-center gap-1.5 sm:gap-2">
+                      <span className="text-xs sm:text-sm font-bold text-[#ff0033]">
+                        เบอร์ติดต่อรับบัตร:
+                      </span>
+                      {!isConfirmed ? (
+                        <span className="text-xs sm:text-sm font-black text-amber-900 bg-amber-100 px-3 py-1 rounded-xl border border-amber-300 flex items-center gap-1.5 shadow-2xs">
+                          <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                          <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
+                        </span>
+                      ) : (
+                        <span className="text-xs sm:text-sm font-bold text-[#ff0033]">
+                          {ticketContactText}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1379,9 +1490,12 @@ export const CleanStadiumContactsView: React.FC<CleanStadiumContactsViewProps> =
                           🏁 สิ้นสุดวันแข่งขันแล้ว (ปิดแสดงข้อมูลจุดรับบัตร)
                         </span>
                       ) : !isConfirmed ? (
-                        <span className="text-xs sm:text-sm font-bold text-amber-700 flex items-center justify-center gap-1.5">
-                          <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                          <span>อยู่ระหว่างผู้ดูแลระบบตรวจสอบและกดยืนยันเบอร์ติดต่อประจำแมตช์นี้</span>
+                        <span className="text-xs sm:text-sm font-bold text-amber-800 flex items-center justify-center gap-1.5">
+                          <span className="text-slate-500 font-bold">จุดรับบัตร:</span>
+                          <span className="bg-amber-100 text-amber-900 px-2.5 py-0.5 rounded-lg border border-amber-300 font-black flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                            <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
+                          </span>
                         </span>
                       ) : (
                         <span className="text-xs sm:text-sm font-extrabold text-slate-800 tracking-wide">

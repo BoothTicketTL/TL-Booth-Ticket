@@ -1298,7 +1298,7 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
                           ) : (
                             <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-bold border border-amber-300 flex items-center gap-1 animate-pulse">
                               <Clock className="w-3 h-3 text-amber-700" />
-                              <span>รอ Admin ยืนยันเบอร์ติดต่อ</span>
+                              <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
                             </span>
                           )}
 
@@ -1442,9 +1442,9 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
                             {/* Display Phone Number ONLY if confirmed by Admin OR viewing as Admin */}
                             <div className="flex items-center justify-between gap-2 pt-1.5">
                               {(!isContactConfirmed && !isUserAdmin) ? (
-                                <div className="w-full p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium flex items-center gap-1.5">
-                                  <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                  <span>รอ Admin ยืนยันเบอร์ก่อนขึ้นเว็บ</span>
+                                <div className="w-full p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-black flex items-center gap-1.5 shadow-2xs">
+                                  <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                                  <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
                                 </div>
                               ) : stadiumContact.boothCoordinatorPhone && stadiumContact.boothCoordinatorPhone !== '-' ? (
                                 <div className="flex items-center justify-between gap-2 w-full">
@@ -1509,9 +1509,9 @@ export const StadiumContactsView: React.FC<StadiumContactsViewProps> = ({
                             {/* Display Phone Number ONLY if confirmed by Admin OR viewing as Admin */}
                             <div className="flex items-center justify-between gap-2 pt-1.5">
                               {(!isContactConfirmed && !isUserAdmin) ? (
-                                <div className="w-full p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-medium flex items-center gap-1.5">
-                                  <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                  <span>รอ Admin ยืนยันเบอร์ก่อนขึ้นเว็บ</span>
+                                <div className="w-full p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-black flex items-center gap-1.5 shadow-2xs">
+                                  <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0 animate-pulse" />
+                                  <span>รอยืนยันเบอร์ติดต่อจาก Admin</span>
                                 </div>
                               ) : stadiumContact.ticketCoordinatorPhone && stadiumContact.ticketCoordinatorPhone !== '-' ? (
                                 <div className="flex items-center justify-between gap-2 w-full">

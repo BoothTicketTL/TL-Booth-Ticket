@@ -306,7 +306,11 @@ export function computeSeasonSummary(
     const s = getRecordSeason(r);
     const matchesSeason = s === seasonId;
     if (!matchesSeason) return false;
-    if (selectedLeague !== 'All' && r.league !== selectedLeague) return false;
+    if (selectedLeague !== 'All') {
+      const normRecLg = r.league === 'Thai League 1' ? 'League 1' : r.league === 'Thai League 2' ? 'League 2' : r.league === 'Thai League 3' ? 'League 3' : r.league;
+      const normSelLg = selectedLeague === 'Thai League 1' ? 'League 1' : selectedLeague === 'Thai League 2' ? 'League 2' : selectedLeague === 'Thai League 3' ? 'League 3' : selectedLeague;
+      if (normRecLg !== normSelLg) return false;
+    }
     return true;
   });
 
@@ -355,10 +359,15 @@ export function computeSeasonSummary(
     totalBooths += bReq;
     totalTickets += tQty;
 
-    if (byLeague[rec.league]) {
-      byLeague[rec.league].registrations++;
-      byLeague[rec.league].booths += bReq;
-      byLeague[rec.league].tickets += tQty;
+    const recLg: LeagueType = rec.league === 'Thai League 1' ? 'League 1'
+      : rec.league === 'Thai League 2' ? 'League 2'
+      : rec.league === 'Thai League 3' ? 'League 3'
+      : (rec.league as LeagueType);
+
+    if (byLeague[recLg]) {
+      byLeague[recLg].registrations++;
+      byLeague[recLg].booths += bReq;
+      byLeague[recLg].tickets += tQty;
     }
 
     // Brand mapping
@@ -388,9 +397,9 @@ export function computeSeasonSummary(
       bStat.approvedTickets += tQty;
     }
 
-    if (bStat.byLeague[rec.league]) {
-      bStat.byLeague[rec.league].booths += bReq;
-      bStat.byLeague[rec.league].tickets += tQty;
+    if (bStat.byLeague[recLg]) {
+      bStat.byLeague[recLg].booths += bReq;
+      bStat.byLeague[recLg].tickets += tQty;
     }
   });
 
@@ -439,7 +448,11 @@ export function computeMonthSummary(
   const filtered = records.filter(r => {
     const match = (r.month === monthKey) || (r.matchDate && r.matchDate.startsWith(monthKey));
     if (!match) return false;
-    if (selectedLeague !== 'All' && r.league !== selectedLeague) return false;
+    if (selectedLeague !== 'All') {
+      const normRecLg = r.league === 'Thai League 1' ? 'League 1' : r.league === 'Thai League 2' ? 'League 2' : r.league === 'Thai League 3' ? 'League 3' : r.league;
+      const normSelLg = selectedLeague === 'Thai League 1' ? 'League 1' : selectedLeague === 'Thai League 2' ? 'League 2' : selectedLeague === 'Thai League 3' ? 'League 3' : selectedLeague;
+      if (normRecLg !== normSelLg) return false;
+    }
     return true;
   });
 
@@ -464,10 +477,15 @@ export function computeMonthSummary(
     if (isBooth) totalBooths++;
     if (isTicket) totalTickets += (Number(r.ticketQuantity) || 0);
 
-    if (byLeague[r.league]) {
-      byLeague[r.league].registrations++;
-      if (isBooth) byLeague[r.league].booths++;
-      if (isTicket) byLeague[r.league].tickets += (Number(r.ticketQuantity) || 0);
+    const rLg: LeagueType = r.league === 'Thai League 1' ? 'League 1'
+      : r.league === 'Thai League 2' ? 'League 2'
+      : r.league === 'Thai League 3' ? 'League 3'
+      : (r.league as LeagueType);
+
+    if (byLeague[rLg]) {
+      byLeague[rLg].registrations++;
+      if (isBooth) byLeague[rLg].booths++;
+      if (isTicket) byLeague[rLg].tickets += (Number(r.ticketQuantity) || 0);
     }
 
     if (r.brand) {
